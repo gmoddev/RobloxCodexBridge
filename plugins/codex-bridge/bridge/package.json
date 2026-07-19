@@ -1,0 +1,10 @@
+{
+  "name": "codex-bridge-local-listener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback-only local listener for CodexBridge Studio sessions.",
+  "scripts": {
+    "start": "node Server.mjs"
+  }
+}

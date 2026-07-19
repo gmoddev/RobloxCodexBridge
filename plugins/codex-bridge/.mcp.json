@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "codex-bridge-studio": {
+      "command": "node",
+      "args": [
+        "./mcp/server/Server.mjs"
+      ],
+      "cwd": ".",
+      "env": {
+        "CODEX_BRIDGE_URL": "http://127.0.0.1:17315"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "codex-bridge-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-first MCP server for the CodexBridge plugin."
+}
