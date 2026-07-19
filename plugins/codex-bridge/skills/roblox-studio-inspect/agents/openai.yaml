@@ -1,7 +1,7 @@
 interface:
-  display_name: "Codex Bridge: Roblox Studio Inspect"
-  short_description: "Inspect live Roblox Studio projects through CodexBridge"
+  display_name: "Codex Bridge: Roblox Studio"
+  short_description: "Inspect and test live Roblox Studio projects"
   icon_small: "./assets/icon.png"
   icon_large: "./assets/logo.png"
   brand_color: "#FFE066"
-  default_prompt: "Use $roblox-studio-inspect to inspect my live Roblox Studio session through CodexBridge."
+  default_prompt: "Use $roblox-studio-inspect to inspect or test my live Roblox Studio session through CodexBridge."

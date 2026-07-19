@@ -1,7 +1,7 @@
 {
   "name": "codex-bridge",
-  "version": "0.1.0",
-  "description": "Inspect a live Roblox Studio CodexBridge session from Codex through read-first MCP tools.",
+  "version": "0.1.0+codex.20260719093743",
+  "description": "Inspect and test a live Roblox Studio session from Codex through CodexBridge MCP tools.",
   "author": {
     "name": "Not_Lowest"
   },
@@ -18,8 +18,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "CodexBridge",
-    "shortDescription": "Inspect live Roblox Studio projects",
-    "longDescription": "Use Codex to inspect live Roblox Studio hierarchy, scripts, GUI trees, serialized instances, and screenshots through the CodexBridge Studio bridge.",
+    "shortDescription": "Inspect and test Roblox Studio projects",
+    "longDescription": "Use Codex to inspect live Roblox Studio hierarchy, scripts, GUI trees, serialized instances, screenshots, and bounded playtest output through the CodexBridge Studio bridge.",
     "developerName": "CodexBridge",
     "category": "Developer Tools",
     "capabilities": [
@@ -29,7 +29,8 @@
     "defaultPrompt": [
       "Inspect StarterGui in my open Roblox Studio project",
       "Read this Studio instance by CodexUniqueID",
-      "List children under this live Studio object"
+      "List children under this live Studio object",
+      "Run a Studio playtest and summarize runtime errors"
     ],
     "brandColor": "#FFE066",
     "composerIcon": "./assets/icon.png",

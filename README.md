@@ -33,7 +33,7 @@ plugins/codex-bridge/
 
 ## What It Can Do
 
-The current Codex-facing toolset is read-first:
+The Codex-facing toolset includes read-first inspection tools:
 
 - `GetStudioSession`
 - `ListInstances`
@@ -43,6 +43,8 @@ The current Codex-facing toolset is read-first:
 - `ReadGuiTree`
 - `SerializeInstance`
 - `CaptureScreenshot`
+
+It also includes `RunStudioTests`, an explicit execution tool that starts a bounded Studio playtest and captures server and client output. It does not expose arbitrary `RunCode` access.
 
 The bridge is useful when filesystem source alone is not enough, such as inspecting live GUI hierarchy, children under script instances, Studio-assigned attributes, inserted assets, screenshots, or runtime-only Studio state.
 
@@ -187,6 +189,14 @@ Use CodexBridge to list the children of Workspace.
 
 The root Workspace id is usually `ws1`.
 
+To capture runtime output, ask:
+
+```text
+Use CodexBridge to run a 10 second Studio test and summarize any errors or warnings.
+```
+
+`RunStudioTests` enters Studio play mode and executes the project's game scripts. Play-mode state is discarded when the test ends.
+
 ## Module Shape Rule
 
 Preserve folder-backed ModuleScript shape:
@@ -228,7 +238,7 @@ Tool calls time out
 
 - Confirm Studio is still open and polling.
 - Check Roblox Studio Output for plugin warnings.
-- Increase `CODEX_BRIDGE_RESULT_TIMEOUT_MS` for large trees or screenshots.
+- Increase `CODEX_BRIDGE_RESULT_TIMEOUT_MS` for large trees, screenshots, or unusually slow playtests.
 
 Deep `ListInstances` calls return empty
 

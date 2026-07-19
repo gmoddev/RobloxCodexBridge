@@ -18,6 +18,7 @@ const SupportedTools = [
   "readGuiTree",
   "serialize",
   "captureScreenshot",
+  "playtest",
 ];
 
 const Sessions = new Map();
@@ -223,14 +224,15 @@ function CleanupSession(Session) {
   const Timestamp = Now();
 
   for (const [RequestId, RequestEnvelope] of Session.PendingRequests) {
-    if (Timestamp - RequestEnvelope.QueuedAt > PendingRequestTimeoutMs) {
+    const ExpiresAt = RequestEnvelope.ExpiresAt ?? RequestEnvelope.QueuedAt + PendingRequestTimeoutMs;
+    if (Timestamp > ExpiresAt) {
       Session.PendingRequests.delete(RequestId);
       Session.CompletedResults.set(RequestId, {
         RequestId,
         CompletedAt: Timestamp,
         Result: {
           status: "failed",
-          error: `Timed out after ${PendingRequestTimeoutMs}ms waiting for Studio to poll this request.`,
+          error: `Timed out waiting for Studio to complete ${RequestEnvelope.toolName}.`,
         },
       });
     }
@@ -337,13 +339,19 @@ async function HandleStudioRequest(Request, Response) {
   }
 
   const Timestamp = typeof Body.timestamp === "number" ? Body.timestamp : Now();
+  const Params = Body.params && typeof Body.params === "object" && !Array.isArray(Body.params) ? Body.params : {};
+  const PlaytestTimeoutMs =
+    ToolName === "playtest"
+      ? Math.min(Math.max(Number(Params.timeout) || 10, 1), 90) * 1000 + 60_000
+      : PendingRequestTimeoutMs;
   const RequestEnvelope = {
     requestId: RequestId,
     toolName: ToolName,
-    params: Body.params && typeof Body.params === "object" && !Array.isArray(Body.params) ? Body.params : {},
+    params: Params,
     timestamp: Timestamp,
     source: Body.source || "unknown",
     QueuedAt: Now(),
+    ExpiresAt: Now() + PlaytestTimeoutMs,
   };
 
   Session.PendingRequests.set(RequestId, RequestEnvelope);

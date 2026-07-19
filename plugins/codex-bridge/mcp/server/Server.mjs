@@ -25,6 +25,7 @@ const SupportedTools = [
   "ReadGuiTree",
   "SerializeInstance",
   "CaptureScreenshot",
+  "RunStudioTests",
 ];
 
 const StudioToolMap = {
@@ -35,6 +36,7 @@ const StudioToolMap = {
   ReadGuiTree: "readGuiTree",
   SerializeInstance: "serialize",
   CaptureScreenshot: "captureScreenshot",
+  RunStudioTests: "playtest",
 };
 
 function Send(Message) {
@@ -324,6 +326,42 @@ function Tools() {
       ["UniqueId"],
     ),
     JsonTool(
+      "RunStudioTests",
+      "Run Studio Tests",
+      "Run the current Roblox project in a bounded Studio playtest and return captured server and client output.",
+      {
+        ...SessionProperties,
+        TimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 90,
+          default: 10,
+          description: "How long Studio should remain in play mode.",
+        },
+        MaxLogs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 2000,
+          default: 300,
+          description: "Maximum number of captured log entries to return.",
+        },
+        IncludeMessages: {
+          type: "boolean",
+          default: true,
+        },
+        IncludeWarnings: {
+          type: "boolean",
+          default: true,
+        },
+        IncludeErrors: {
+          type: "boolean",
+          default: true,
+        },
+      },
+      [],
+      { readOnlyHint: false },
+    ),
+    JsonTool(
       "CaptureScreenshot",
       "Capture Screenshot",
       "Capture a Studio viewport screenshot through the existing bridge screenshot action.",
@@ -467,9 +505,127 @@ function NormalizeStudioParams(ToolName, Arguments) {
         templateName: OptionalString(Args.TemplateName, "TemplateName"),
         maxWidth: OptionalInteger(Args.MaxWidth, "MaxWidth", 64, 4096),
       });
+    case "RunStudioTests":
+      return {
+        timeout: OptionalInteger(Args.TimeoutSeconds, "TimeoutSeconds", 1, 90) ?? 10,
+        maxLogs: OptionalInteger(Args.MaxLogs, "MaxLogs", 1, 2000) ?? 300,
+        includeMessages: OptionalBoolean(Args.IncludeMessages, "IncludeMessages") ?? true,
+        includeWarnings: OptionalBoolean(Args.IncludeWarnings, "IncludeWarnings") ?? true,
+        includeErrors: OptionalBoolean(Args.IncludeErrors, "IncludeErrors") ?? true,
+        compactResult: true,
+      };
     default:
       throw new Error(`Unsupported Studio tool: ${ToolName}`);
   }
+}
+
+function NormalizeStudioTestResult(Value, Arguments) {
+  const Result = typeof Value === "object" && Value !== null ? Value : {};
+  const MaxLogs = Arguments.MaxLogs ?? 300;
+  const IncludeMessages = Arguments.IncludeMessages ?? true;
+  const IncludeWarnings = Arguments.IncludeWarnings ?? true;
+  const IncludeErrors = Arguments.IncludeErrors ?? true;
+  const RawLogs = Array.isArray(Result.logs) ? Result.logs : Array.isArray(Result.Logs) ? Result.Logs : [];
+  const Logs = [];
+  const Errors = [];
+  let ErrorCount = 0;
+  let WarningCount = 0;
+  let MessageCount = 0;
+  let Truncated = Result.truncated === true || Result.Truncated === true;
+
+  function ClipMessage(ValueToClip) {
+    const Message = String(ValueToClip ?? "");
+    if (Message.length <= 8000) {
+      return Message;
+    }
+    Truncated = true;
+    return `${Message.slice(0, 8000)}... [truncated]`;
+  }
+
+  function ParseError(Message, Context) {
+    const Match = Message.match(/([A-Za-z0-9_.]+):(\d+):/);
+    return CompactObject({
+      ScriptPath: Match ? Match[1].replaceAll(".", "/") : "Unknown",
+      LineNumber: Match ? Number(Match[2]) : undefined,
+      Message,
+      Context,
+    });
+  }
+
+  for (const RawEntry of RawLogs) {
+    if (typeof RawEntry !== "object" || RawEntry === null) {
+      continue;
+    }
+
+    const Level = String(RawEntry.type ?? RawEntry.Type ?? RawEntry.level ?? RawEntry.Level ?? "unknown").toLowerCase();
+    const Context = OptionalString(RawEntry.context ?? RawEntry.Context, "Log.Context");
+    const Message = ClipMessage(RawEntry.message ?? RawEntry.Message);
+
+    if (Level === "error") {
+      ErrorCount += 1;
+      if (IncludeErrors) {
+        Errors.push(ParseError(Message, Context));
+      }
+    } else if (Level === "warn" || Level === "warning") {
+      WarningCount += 1;
+    } else {
+      MessageCount += 1;
+    }
+
+    const ShouldInclude =
+      (Level === "error" && IncludeErrors) ||
+      ((Level === "warn" || Level === "warning") && IncludeWarnings) ||
+      (Level !== "error" && Level !== "warn" && Level !== "warning" && IncludeMessages);
+    if (!ShouldInclude) {
+      continue;
+    }
+    if (Logs.length >= MaxLogs) {
+      Truncated = true;
+      continue;
+    }
+
+    Logs.push(CompactObject({ Level: Level === "warning" ? "warn" : Level, Message, Context }));
+  }
+
+  if (RawLogs.length === 0 && IncludeErrors) {
+    const RawErrors = Array.isArray(Result.errors) ? Result.errors : Array.isArray(Result.Errors) ? Result.Errors : [];
+    ErrorCount = RawErrors.length;
+    for (const RawError of RawErrors.slice(0, MaxLogs)) {
+      if (typeof RawError === "object" && RawError !== null) {
+        Errors.push(
+          CompactObject({
+            ScriptPath: RawError.scriptPath ?? RawError.ScriptPath ?? "Unknown",
+            LineNumber: RawError.lineNumber ?? RawError.LineNumber,
+            Message: ClipMessage(RawError.message ?? RawError.Message),
+          }),
+        );
+      } else {
+        Errors.push(ParseError(ClipMessage(RawError)));
+      }
+    }
+    Truncated ||= RawErrors.length > MaxLogs;
+  }
+
+  const Status = String(Result.status ?? Result.Status ?? "failed");
+  const DurationMs = Number(Result.duration ?? Result.Duration ?? 0);
+  return CompactObject({
+    Status,
+    Summary: {
+      Passed: Status === "completed" && ErrorCount === 0,
+      ErrorCount,
+      WarningCount,
+      MessageCount,
+      DurationMs: Number.isFinite(DurationMs) ? Math.round(DurationMs) : 0,
+    },
+    Logs,
+    Errors: IncludeErrors ? Errors.slice(0, MaxLogs) : [],
+    Truncated,
+    Error: Result.error ?? Result.Error,
+  });
+}
+
+function FormatToolResult(ToolName, Result, Arguments) {
+  return ToolName === "RunStudioTests" ? NormalizeStudioTestResult(Result, Arguments) : Result;
 }
 
 function ExtractImmediateResult(ResponseJson) {
@@ -501,8 +657,8 @@ function ExtractRequestId(ResponseJson, FallbackRequestId) {
   return ResponseJson.requestId || ResponseJson.RequestId || FallbackRequestId;
 }
 
-async function PollStudioResult(RequestId, Headers) {
-  const TimeoutMs = GetEnvNumber("CODEX_BRIDGE_RESULT_TIMEOUT_MS", 30000);
+async function PollStudioResult(RequestId, Headers, DefaultTimeoutMs = 30000) {
+  const TimeoutMs = GetEnvNumber("CODEX_BRIDGE_RESULT_TIMEOUT_MS", DefaultTimeoutMs);
   const PollMs = GetEnvNumber("CODEX_BRIDGE_RESULT_POLL_MS", 1000);
   const StartedAt = Date.now();
   const Template = GetEnvString("CODEX_BRIDGE_RESULT_TEMPLATE", DefaultResultTemplate);
@@ -573,12 +729,13 @@ async function CallStudioAction(ToolName, Arguments) {
 
   const ImmediateResult = ExtractImmediateResult(Response.Json);
   if (ImmediateResult !== undefined) {
-    return TextResult(ImmediateResult);
+    return TextResult(FormatToolResult(ToolName, ImmediateResult, Args));
   }
 
   const QueuedRequestId = ExtractRequestId(Response.Json, RequestId);
-  const Result = await PollStudioResult(QueuedRequestId, Headers);
-  return TextResult(Result);
+  const DefaultTimeoutMs = ToolName === "RunStudioTests" ? (Params.timeout + 60) * 1000 : 30000;
+  const Result = await PollStudioResult(QueuedRequestId, Headers, DefaultTimeoutMs);
+  return TextResult(FormatToolResult(ToolName, Result, Args));
 }
 
 async function HandleToolCall(Id, Params) {

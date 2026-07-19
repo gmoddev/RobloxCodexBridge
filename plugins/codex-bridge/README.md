@@ -1,6 +1,6 @@
 # CodexBridge Plugin
 
-This is a Codex plugin, not a Roblox Studio plugin. It bridges Codex to a running Roblox Studio plugin through a read-first MCP server and a local CodexBridge listener.
+This is a Codex plugin, not a Roblox Studio plugin. It bridges Codex to a running Roblox Studio plugin through an inspect-and-test MCP server and a local CodexBridge listener.
 
 CodexBridge is shared as an experimental local developer tool derived from the lemonade.gg plugin codebase. The goal is to use this as a practical starting point for Codex-to-Studio integration while a separate standalone plugin is developed over time.
 
@@ -25,7 +25,7 @@ Optional environment variables:
 - `CODEX_BRIDGE_URL`: defaults to `http://127.0.0.1:17315`.
 - `CODEX_BRIDGE_REQUEST_PATH`: defaults to `v1/studio/request`.
 - `CODEX_BRIDGE_RESULT_TEMPLATE`: defaults to `v1/studio/result/{RequestId}`.
-- `CODEX_BRIDGE_RESULT_TIMEOUT_MS`: defaults to `30000`.
+- `CODEX_BRIDGE_RESULT_TIMEOUT_MS`: optional global result timeout override. Read tools default to `30000`; `RunStudioTests` defaults to its play duration plus 60 seconds.
 - `CODEX_BRIDGE_RESULT_POLL_MS`: defaults to `1000`.
 - `CODEX_BRIDGE_HTTP_TIMEOUT_MS`: defaults to `20000`.
 - `CODEX_BRIDGE_PORT`: local listener port, defaults to `17315`.
@@ -65,7 +65,19 @@ Read-only MCP tools:
 - `SerializeInstance`
 - `CaptureScreenshot`
 
-The server sends existing Studio action names to the local bridge (`list`, `glob`, `readInstance`, `readScript`, `readGuiTree`, `serialize`, `captureScreenshot`) while exposing PascalCase tool names and inputs to Codex.
+Execution MCP tools:
+
+- `RunStudioTests`: enters a bounded Studio play session, executes the project's game scripts, and returns captured server/client output.
+
+The server sends existing Studio action names to the local bridge (`list`, `glob`, `readInstance`, `readScript`, `readGuiTree`, `serialize`, `captureScreenshot`, `playtest`) while exposing PascalCase tool names and inputs to Codex.
+
+Example requests:
+
+```text
+@codex run the Studio test and show me the output
+@codex run a 15 second Studio playtest and summarize errors
+@codex check the current Studio session, then run tests
+```
 
 ## Module Shape Rule
 

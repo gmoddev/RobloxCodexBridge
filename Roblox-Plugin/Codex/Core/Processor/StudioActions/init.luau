@@ -329,6 +329,11 @@ end
 -- them as `frames` (single-tile RGBA) for agent-side GIF assembly.
 function StudioActions:playtest(params: {
 	timeout: number?,
+	maxLogs: number?,
+	includeMessages: boolean?,
+	includeWarnings: boolean?,
+	includeErrors: boolean?,
+	compactResult: boolean?,
 	serverScript: string?,
 	localScript: string?,
 	captureFrames: {
@@ -347,6 +352,13 @@ function StudioActions:playtest(params: {
 		}
 	}?,
 	messages: { string }?,
+	logs: {
+		{
+			type: string,
+			message: string,
+			context: string?,
+		}
+	}?,
 	duration: number?,
 	frames: {
 		{
@@ -359,6 +371,7 @@ function StudioActions:playtest(params: {
 	captureComplete: boolean?,
 	captureWallMs: number?,
 	captureStartedBySignal: boolean?,
+	truncated: boolean?,
 	error: string?,
 }
 	return playtestHandler(self, params)

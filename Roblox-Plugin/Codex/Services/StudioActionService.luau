@@ -31,6 +31,7 @@ local SUPPORTED_TOOLS = {
 	"readGuiTree",
 	"serialize",
 	"captureScreenshot",
+	"playtest",
 }
 
 local StudioActionService = {}

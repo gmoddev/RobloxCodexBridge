@@ -18,7 +18,9 @@ local Log = require(Codex.Log)
 local HttpCore = require(Codex.Net.HttpCore)
 local renderContentId = require(script.Parent.renderContentId)
 
-local MAX_LOGS = 200
+local DefaultMaxLogs = 300
+local MaxAllowedLogs = 2000
+local MaxMessageLength = 8000
 
 type CaptureFramesParams = {
 	count: number,
@@ -54,6 +56,11 @@ return function(
 	_self,
 	params: {
 		timeout: number?,
+		maxLogs: number?,
+		includeMessages: boolean?,
+		includeWarnings: boolean?,
+		includeErrors: boolean?,
+		compactResult: boolean?,
 		serverScript: string?,
 		localScript: string?,
 		captureFrames: CaptureFramesParams?,
@@ -79,9 +86,15 @@ return function(
 	captureComplete: boolean?,
 	captureWallMs: number?,
 	captureStartedBySignal: boolean?,
+	truncated: boolean?,
 	error: string?,
 }
-	local timeout = math.min(params.timeout or 10, 60) -- Cap at 60 seconds
+	local timeout = math.min(params.timeout or 10, 90)
+	local MaxLogs = DefaultMaxLogs
+	if type(params.maxLogs) == "number" then
+		MaxLogs = math.clamp(math.floor(params.maxLogs), 1, MaxAllowedLogs)
+	end
+	local MessageLengthLimit = math.min(MaxMessageLength, math.max(1, math.floor(8_000_000 / MaxLogs)))
 	local capture = params.captureFrames
 
 	Log.info(
@@ -273,7 +286,7 @@ StudioTestService:EndTest({
 	returnValue = returnData,
 })
 ]],
-			MAX_LOGS,
+			MaxLogs,
 			timeout,
 			capture.stabilizationMs,
 			capture.intervalMs,
@@ -381,7 +394,7 @@ StudioTestService:EndTest({
 	returnValue = returnData,
 })
 ]],
-			MAX_LOGS,
+			MaxLogs,
 			timeout
 		)
 	end
@@ -753,6 +766,17 @@ end)
 	local captureComplete = false
 	local captureWallMs: number? = nil
 	local captureStartedBySignal: boolean? = nil
+	local Truncated = false
+
+	local function TruncateMessage(Value: any): string
+		local Message = tostring(Value)
+		if #Message <= MessageLengthLimit then
+			return Message
+		end
+
+		Truncated = true
+		return string.sub(Message, 1, MessageLengthLimit) .. "... [truncated]"
+	end
 
 	if resultOrError and resultOrError.returnValue then
 		local parseSuccess, parsed = pcall(function()
@@ -763,6 +787,11 @@ end)
 			-- Parse error messages to extract script path and line number
 			if parsed.errors then
 				for _, errorMsg in ipairs(parsed.errors) do
+					if #errors >= MaxLogs then
+						Truncated = true
+						break
+					end
+					errorMsg = TruncateMessage(errorMsg)
 					local scriptPath = "Unknown"
 					local lineNumber = nil
 
@@ -788,16 +817,30 @@ end)
 			end
 
 			if parsed.messages then
-				messages = parsed.messages
+				for _, Message in ipairs(parsed.messages) do
+					if #messages >= MaxLogs then
+						Truncated = true
+						break
+					end
+					table.insert(messages, TruncateMessage(Message))
+				end
 			end
 
 			if parsed.logs and type(parsed.logs) == "table" then
 				for _, entry in ipairs(parsed.logs) do
+					if #logs >= MaxLogs then
+						Truncated = true
+						break
+					end
 					if type(entry) == "table" and type(entry.type) == "string" and type(entry.message) == "string" then
 						local context = (type(entry.context) == "string") and entry.context or nil
-						table.insert(logs, { type = entry.type, message = entry.message, context = context })
+						table.insert(logs, { type = entry.type, message = TruncateMessage(entry.message), context = context })
 					end
 				end
+			end
+
+			if #errors >= MaxLogs or #messages >= MaxLogs or #logs >= MaxLogs then
+				Truncated = true
 			end
 
 			if parsed.frameContentIds and type(parsed.frameContentIds) == "table" then
@@ -965,6 +1008,15 @@ end)
 			or ""
 	)
 
+	if params.compactResult and not capture then
+		return {
+			status = "completed",
+			logs = logs,
+			duration = duration,
+			truncated = Truncated,
+		}
+	end
+
 	if capture then
 		return {
 			status = "completed",
@@ -977,6 +1029,7 @@ end)
 			captureComplete = captureComplete,
 			captureWallMs = captureWallMs,
 			captureStartedBySignal = captureStartedBySignal,
+			truncated = Truncated,
 		}
 	end
 
@@ -986,5 +1039,6 @@ end)
 		messages = messages,
 		logs = logs,
 		duration = duration,
+		truncated = Truncated,
 	}
 end

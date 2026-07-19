@@ -1,6 +1,6 @@
 ---
 name: roblox-studio-inspect
-description: Inspect live Roblox Studio projects through the CodexBridge MCP bridge. Use when users ask about live Studio hierarchy, GUI trees, script contents, Studio-only objects, screenshots, or CodexUniqueID-based Roblox instances.
+description: Inspect and test live Roblox Studio projects through the CodexBridge MCP bridge. Use when users ask about live Studio hierarchy, GUI trees, script contents, Studio-only objects, screenshots, runtime output, playtests, or CodexUniqueID-based Roblox instances.
 ---
 
 # Roblox Studio Inspect
@@ -17,6 +17,7 @@ Use this skill when a user asks Codex to inspect a live Roblox Studio project th
 - Use `GlobInstances` for searching live instances by name/path/class.
 - Use `SerializeInstance` for debug snapshots or rollback planning, not routine UI inspection.
 - Use `CaptureScreenshot` only when visual verification matters.
+- Use `RunStudioTests` only when the user asks to run or test the project, enter play mode, or capture runtime output.
 
 ## Module Shape Rule
 
@@ -60,8 +61,9 @@ If a public MCP input must be lower camel case for compatibility, convert it to 
 
 ## Safety
 
-- Treat the current tool catalog as read-only.
+- Treat inspection tools as read-only. `RunStudioTests` executes project scripts in a temporary Studio play session.
 - Do not use `RunCode` for normal inspection.
+- Do not run a playtest automatically while performing routine inspection.
 - Ask before any future write or destructive Studio action.
 - Do not log secrets or large script bodies unnecessarily.
 - Respect tool limits such as `MaxDepth`, `MaxNodes`, `MaxResults`, and line ranges.
@@ -71,4 +73,5 @@ If a public MCP input must be lower camel case for compatibility, convert it to 
 1. Call `GetStudioSession` to confirm the local bridge and Studio connection status.
 2. For UI work, call `ReadGuiTree` with `RootUniqueId` omitted to inspect `StarterGui` (`sg1`).
 3. For scripts, use `ListInstances` or `GlobInstances` to find the script, then `ReadScript`.
-4. If a result is truncated, narrow the root or lower the scope before retrying.
+4. For requested runtime verification, call `RunStudioTests` and summarize its `Summary`, `Errors`, and relevant `Logs`.
+5. If a result is truncated, narrow the root, lower the scope, or reduce the playtest duration before retrying.
