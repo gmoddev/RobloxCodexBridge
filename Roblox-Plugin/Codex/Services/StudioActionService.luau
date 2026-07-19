@@ -358,17 +358,38 @@ function StudioActionService:_executeRequest(request: {
 })
 	Log.info(string.format("[StudioActionService] Executing request %s: tool=%s", request.requestId, request.toolName))
 
-	local Success, Result = pcall(function()
+	local Success, Result = xpcall(function()
 		local Handler = self.actionHandlers[request.toolName]
 		if not Handler then
 			error(string.format("No handler found for tool: %s", request.toolName))
 		end
 		return Handler(self.actionHandlers, request.params or {})
+	end, function(ErrorValue)
+		return {
+			Message = tostring(ErrorValue),
+			StackTrace = debug.traceback(nil, 2),
+		}
 	end)
 
 	local ResultPayload
 	if Success then
-		ResultPayload = Result
+		if type(Result) == "table" then
+			ResultPayload = Result
+		else
+			ResultPayload = {
+				status = "failed",
+				errorCategory = "studio_action_failed",
+				error = "Studio action returned an invalid result payload.",
+				retryable = false,
+			}
+		end
+
+		if ResultPayload.status == "failed" and ResultPayload.errorCategory == nil then
+			ResultPayload.errorCategory = "studio_action_failed"
+			if ResultPayload.retryable == nil then
+				ResultPayload.retryable = false
+			end
+		end
 		Log.info(string.format("[StudioActionService] Request %s completed successfully", request.requestId))
 
 		if ResultPayload.status == "completed" and self.__onActionComplete then
@@ -377,9 +398,12 @@ function StudioActionService:_executeRequest(request: {
 	else
 		ResultPayload = {
 			status = "failed",
-			error = tostring(Result),
+			errorCategory = "studio_action_failed",
+			error = Result.Message,
+			stackTrace = Result.StackTrace,
+			retryable = false,
 		}
-		Log.warn(string.format("[StudioActionService] Request %s failed: %s", request.requestId, tostring(Result)))
+		Log.warn(string.format("[StudioActionService] Request %s failed: %s", request.requestId, Result.Message))
 	end
 
 	self:_postResult(request.requestId, ResultPayload)

@@ -21,6 +21,8 @@ local renderContentId = require(script.Parent.renderContentId)
 local DefaultMaxLogs = 300
 local MaxAllowedLogs = 2000
 local MaxMessageLength = 8000
+local TemporaryScriptName = "_TemporaryCODEXScript"
+local TemporaryScriptAttribute = "CodexTemporarySmokeTest"
 
 type CaptureFramesParams = {
 	count: number,
@@ -52,6 +54,25 @@ type PlaytestLogEntry = {
 	context: string?,
 }
 
+type PlaytestRuntimeError = {
+	scriptPath: string?,
+	studioPath: string?,
+	scriptUniqueId: string?,
+	lineNumber: number?,
+	message: string,
+	stackTrace: string?,
+	context: string?,
+}
+
+type TemporarySmokeTestResult = {
+	name: string,
+	scriptName: string,
+	serverInjected: boolean,
+	clientInjected: boolean,
+	clientLocation: string?,
+	cleanupVerified: boolean,
+}
+
 return function(
 	_self,
 	params: {
@@ -63,15 +84,21 @@ return function(
 		compactResult: boolean?,
 		serverScript: string?,
 		localScript: string?,
+		smokeTestName: string?,
+		localScriptLocation: string?,
 		captureFrames: CaptureFramesParams?,
 	}
 ): {
 	status: string,
 	errors: {
 		{
-			scriptPath: string,
+			scriptPath: string?,
+			studioPath: string?,
+			scriptUniqueId: string?,
 			lineNumber: number?,
 			message: string,
+			stackTrace: string?,
+			context: string?,
 		}
 	}?,
 	messages: { string }?,
@@ -87,6 +114,7 @@ return function(
 	captureWallMs: number?,
 	captureStartedBySignal: boolean?,
 	truncated: boolean?,
+	temporarySmokeTest: TemporarySmokeTestResult?,
 	error: string?,
 }
 	local timeout = math.min(params.timeout or 10, 90)
@@ -96,6 +124,73 @@ return function(
 	end
 	local MessageLengthLimit = math.min(MaxMessageLength, math.max(1, math.floor(8_000_000 / MaxLogs)))
 	local capture = params.captureFrames
+	local SmokeTestName = params.smokeTestName
+	local IsTemporarySmokeTest = type(SmokeTestName) == "string" and SmokeTestName ~= ""
+	local ServerScriptParent = game:GetService("ServerScriptService")
+	local ClientScriptParent = game:GetService("StarterPlayer").StarterPlayerScripts
+	local ClientScriptLocation = params.localScriptLocation or "StarterPlayerScripts"
+	local TemporaryParents = {}
+	local RemovedStaleTemporaryPaths = {}
+
+	if IsTemporarySmokeTest then
+		if not params.serverScript and not params.localScript then
+			return {
+				status = "failed",
+				error = "Temporary smoke test requires serverScript or localScript.",
+			}
+		end
+
+		if ClientScriptLocation == "ReplicatedFirst" then
+			ClientScriptParent = game:GetService("ReplicatedFirst")
+		elseif ClientScriptLocation ~= "StarterPlayerScripts" then
+			return {
+				status = "failed",
+				error = string.format("Unsupported temporary LocalScript location: %s", tostring(ClientScriptLocation)),
+			}
+		end
+
+		if params.serverScript then
+			table.insert(TemporaryParents, ServerScriptParent)
+		end
+		if params.localScript then
+			table.insert(TemporaryParents, ClientScriptParent)
+		end
+
+		for _, Parent in ipairs(TemporaryParents) do
+			for _, Child in ipairs(Parent:GetChildren()) do
+				if Child.Name == TemporaryScriptName then
+					if Child:GetAttribute(TemporaryScriptAttribute) == true then
+						table.insert(RemovedStaleTemporaryPaths, Child:GetFullName())
+						Child:Destroy()
+					else
+						return {
+							status = "failed",
+							error = string.format(
+								"Reserved temporary script name is already used at %s.",
+								Child:GetFullName()
+							),
+						}
+					end
+				end
+			end
+		end
+
+		if #RemovedStaleTemporaryPaths > 0 then
+			return {
+				status = "failed",
+				error = "Removed stale owned _TemporaryCODEXScript instance(s); verify cleanup before retrying.",
+				retryable = true,
+				temporarySmokeTest = {
+					name = SmokeTestName :: string,
+					scriptName = TemporaryScriptName,
+					serverInjected = false,
+					clientInjected = false,
+					clientLocation = nil,
+					cleanupVerified = true,
+				},
+			}
+		end
+	end
 
 	Log.info(
 		"[playtest] Starting play mode for",
@@ -122,6 +217,7 @@ local LogService = game:GetService("LogService")
 local StudioTestService = game:GetService("StudioTestService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ScriptContext = game:GetService("ScriptContext")
 
 local MAX_LOGS = %d
 local timeout = %d
@@ -148,6 +244,41 @@ local startedAt = tick()
 local messages = {}
 local errors = {}
 local logs = {}
+local runtimeErrors = {}
+
+local function recordRuntimeError(message, stackTrace, scriptInstance, context)
+	if #runtimeErrors >= MAX_LOGS then
+		return nil
+	end
+
+	local studioPath = nil
+	local scriptUniqueId = nil
+	if scriptInstance then
+		pcall(function()
+			studioPath = scriptInstance:GetFullName()
+			scriptUniqueId = scriptInstance:GetAttribute("CodexUniqueID")
+		end)
+	end
+
+	local lineMatch = string.match(stackTrace or "", ":(%%d+):")
+		or string.match(stackTrace or "", "[Ll]ine%%s+(%%d+)")
+		or string.match(message or "", ":(%%d+):")
+	local runtimeError = {
+		scriptPath = studioPath,
+		studioPath = studioPath,
+		scriptUniqueId = scriptUniqueId,
+		lineNumber = lineMatch and tonumber(lineMatch) or nil,
+		message = tostring(message),
+		stackTrace = tostring(stackTrace or ""),
+		context = context,
+	}
+	table.insert(runtimeErrors, runtimeError)
+	return runtimeError
+end
+
+local errorConnection = ScriptContext.Error:Connect(function(message, stackTrace, scriptInstance)
+	recordRuntimeError(message, stackTrace, scriptInstance, "server")
+end)
 -- Frames arrive sequence-indexed. The capture loop is sequential (each
 -- screenshot waits for its callback before scheduling the next), so callbacks
 -- normally arrive in order — but the index lets us defensively compact a
@@ -231,6 +362,14 @@ channel.OnServerEvent:Connect(function(_player, payload)
 				context = "client",
 			})
 		end
+	elseif payload.kind == "runtimeError" and type(payload.message) == "string" then
+		local RuntimeError = recordRuntimeError(payload.message, payload.stackTrace, nil, "client")
+		if RuntimeError then
+			RuntimeError.scriptPath = payload.scriptPath
+			RuntimeError.studioPath = payload.studioPath
+			RuntimeError.scriptUniqueId = payload.scriptUniqueId
+			RuntimeError.lineNumber = payload.lineNumber
+		end
 	end
 end)
 
@@ -261,6 +400,7 @@ end
 task.wait(0.25)
 
 connection:Disconnect()
+errorConnection:Disconnect()
 
 -- Sparse → dense ordered list. Skips holes (frames whose callbacks never
 -- fired or never made it to FireServer); the consumer sees a contiguous
@@ -274,6 +414,7 @@ end
 
 local returnData = HttpService:JSONEncode({
 	errors = errors,
+	runtimeErrors = runtimeErrors,
 	messages = messages,
 	logs = logs,
 	frameContentIds = frameContentIds,
@@ -299,6 +440,7 @@ local LogService = game:GetService("LogService")
 local StudioTestService = game:GetService("StudioTestService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ScriptContext = game:GetService("ScriptContext")
 
 local MAX_LOGS = %d
 local timeout = %d
@@ -320,6 +462,41 @@ end
 local messages = {}
 local errors = {}
 local logs = {}
+local runtimeErrors = {}
+
+local function recordRuntimeError(message, stackTrace, scriptInstance, context)
+	if #runtimeErrors >= MAX_LOGS then
+		return nil
+	end
+
+	local studioPath = nil
+	local scriptUniqueId = nil
+	if scriptInstance then
+		pcall(function()
+			studioPath = scriptInstance:GetFullName()
+			scriptUniqueId = scriptInstance:GetAttribute("CodexUniqueID")
+		end)
+	end
+
+	local lineMatch = string.match(stackTrace or "", ":(%%d+):")
+		or string.match(stackTrace or "", "[Ll]ine%%s+(%%d+)")
+		or string.match(message or "", ":(%%d+):")
+	local runtimeError = {
+		scriptPath = studioPath,
+		studioPath = studioPath,
+		scriptUniqueId = scriptUniqueId,
+		lineNumber = lineMatch and tonumber(lineMatch) or nil,
+		message = tostring(message),
+		stackTrace = tostring(stackTrace or ""),
+		context = context,
+	}
+	table.insert(runtimeErrors, runtimeError)
+	return runtimeError
+end
+
+local errorConnection = ScriptContext.Error:Connect(function(message, stackTrace, scriptInstance)
+	recordRuntimeError(message, stackTrace, scriptInstance, "server")
+end)
 
 -- Capture all log output
 local connection = LogService.MessageOut:Connect(function(message, messageType)
@@ -370,6 +547,14 @@ channel.OnServerEvent:Connect(function(_player, payload)
 				context = "client",
 			})
 		end
+	elseif payload.kind == "runtimeError" and type(payload.message) == "string" then
+		local RuntimeError = recordRuntimeError(payload.message, payload.stackTrace, nil, "client")
+		if RuntimeError then
+			RuntimeError.scriptPath = payload.scriptPath
+			RuntimeError.studioPath = payload.studioPath
+			RuntimeError.scriptUniqueId = payload.scriptUniqueId
+			RuntimeError.lineNumber = payload.lineNumber
+		end
 	end
 end)
 
@@ -381,10 +566,12 @@ task.wait(0.25)
 
 -- Disconnect log capture
 connection:Disconnect()
+errorConnection:Disconnect()
 
 -- Build return data
 local returnData = HttpService:JSONEncode({
 	errors = errors,
+	runtimeErrors = runtimeErrors,
 	messages = messages,
 	logs = logs,
 })
@@ -429,6 +616,7 @@ StudioTestService:EndTest({
 		logForwarder.Source = [[
 local LogService = game:GetService("LogService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ScriptContext = game:GetService("ScriptContext")
 
 local channel = ReplicatedStorage:WaitForChild("__PlaytestCaptureChannel__", 10)
 if not channel then
@@ -466,6 +654,32 @@ LogService.MessageOut:Connect(function(message, messageType)
 		channel:FireServer({ kind = "log", type = classify(messageType), message = message })
 	end)
 end)
+
+ScriptContext.Error:Connect(function(Message, StackTrace, ScriptInstance)
+	local StudioPath = nil
+	local ScriptUniqueId = nil
+	if ScriptInstance then
+		pcall(function()
+			StudioPath = ScriptInstance:GetFullName()
+			ScriptUniqueId = ScriptInstance:GetAttribute("CodexUniqueID")
+		end)
+	end
+
+	local LineMatch = string.match(StackTrace or "", ":(%d+):")
+		or string.match(StackTrace or "", "[Ll]ine%s+(%d+)")
+		or string.match(Message or "", ":(%d+):")
+	pcall(function()
+		channel:FireServer({
+			kind = "runtimeError",
+			message = tostring(Message),
+			stackTrace = tostring(StackTrace or ""),
+			scriptPath = StudioPath,
+			studioPath = StudioPath,
+			scriptUniqueId = ScriptUniqueId,
+			lineNumber = LineMatch and tonumber(LineMatch) or nil,
+		})
+	end)
+end)
 ]]
 		logForwarder.Parent = sps
 		table.insert(injectedInstances, logForwarder)
@@ -473,28 +687,45 @@ end)
 	end
 
 	if params.serverScript then
-		local sss = game:GetService("ServerScriptService")
-		destroyIfPresent(sss, "__PlaytestUserServerScript__")
-		local s = Instance.new("Script")
-		s.Name = "__PlaytestUserServerScript__"
-		s.Source = params.serverScript
-		s.Parent = sss
-		table.insert(injectedInstances, s)
-		Log.info("[playtest] Injected __PlaytestUserServerScript__")
+		local ScriptName = if IsTemporarySmokeTest then TemporaryScriptName else "__PlaytestUserServerScript__"
+		if not IsTemporarySmokeTest then
+			destroyIfPresent(ServerScriptParent, ScriptName)
+		end
+		local ServerScript = Instance.new("Script")
+		ServerScript.Name = ScriptName
+		ServerScript.Source = params.serverScript
+		if IsTemporarySmokeTest then
+			ServerScript:SetAttribute(TemporaryScriptAttribute, true)
+			ServerScript:SetAttribute("CodexTemporarySmokeTestName", SmokeTestName)
+			ServerScript:SetAttribute("CodexUniqueID", "temporary-server-" .. HttpService:GenerateGUID(false))
+		end
+		ServerScript.Parent = ServerScriptParent
+		table.insert(injectedInstances, ServerScript)
+		Log.info("[playtest] Injected " .. ScriptName)
 	end
 
 	if params.localScript then
 		-- StarterPlayerScripts is always a default child of StarterPlayer in Studio.
 		-- Do NOT parent a LocalScript directly to StarterPlayer — it only runs from
 		-- StarterPlayerScripts, StarterCharacterScripts, or a Player's PlayerScripts.
-		local sps = game:GetService("StarterPlayer").StarterPlayerScripts
-		destroyIfPresent(sps, "__PlaytestUserLocalScript__")
-		local ls = Instance.new("LocalScript")
-		ls.Name = "__PlaytestUserLocalScript__"
-		ls.Source = params.localScript
-		ls.Parent = sps
-		table.insert(injectedInstances, ls)
-		Log.info("[playtest] Injected __PlaytestUserLocalScript__")
+		local ScriptName = if IsTemporarySmokeTest then TemporaryScriptName else "__PlaytestUserLocalScript__"
+		local LocalScriptParent = if IsTemporarySmokeTest
+			then ClientScriptParent
+			else game:GetService("StarterPlayer").StarterPlayerScripts
+		if not IsTemporarySmokeTest then
+			destroyIfPresent(LocalScriptParent, ScriptName)
+		end
+		local LocalScript = Instance.new("LocalScript")
+		LocalScript.Name = ScriptName
+		LocalScript.Source = params.localScript
+		if IsTemporarySmokeTest then
+			LocalScript:SetAttribute(TemporaryScriptAttribute, true)
+			LocalScript:SetAttribute("CodexTemporarySmokeTestName", SmokeTestName)
+			LocalScript:SetAttribute("CodexUniqueID", "temporary-client-" .. HttpService:GenerateGUID(false))
+		end
+		LocalScript.Parent = LocalScriptParent
+		table.insert(injectedInstances, LocalScript)
+		Log.info("[playtest] Injected " .. ScriptName .. " into " .. ClientScriptLocation)
 	end
 
 	if capture then
@@ -736,6 +967,27 @@ end)
 		end
 	end
 
+	local TemporarySmokeTestResultValue: TemporarySmokeTestResult? = nil
+	if IsTemporarySmokeTest then
+		local CleanupVerified = true
+		for _, Parent in ipairs(TemporaryParents) do
+			for _, Child in ipairs(Parent:GetChildren()) do
+				if Child.Name == TemporaryScriptName and Child:GetAttribute(TemporaryScriptAttribute) == true then
+					CleanupVerified = false
+				end
+			end
+		end
+
+		TemporarySmokeTestResultValue = {
+			name = SmokeTestName :: string,
+			scriptName = TemporaryScriptName,
+			serverInjected = params.serverScript ~= nil,
+			clientInjected = params.localScript ~= nil,
+			clientLocation = if params.localScript then ClientScriptLocation else nil,
+			cleanupVerified = CleanupVerified,
+		}
+	end
+
 	-- If play mode exited significantly earlier than the timeout, a user-provided
 	-- script likely called StudioTestService:EndTest — which also drops captured
 	-- log output (their EndTest call overrides ours). Surface it in plugin logs.
@@ -755,11 +1007,12 @@ end)
 		return {
 			status = "failed",
 			error = string.format("Play mode failed: %s", tostring(resultOrError)),
+			temporarySmokeTest = TemporarySmokeTestResultValue,
 		}
 	end
 
 	-- Parse the returnValue from EndTest
-	local errors = {}
+	local errors: { PlaytestRuntimeError } = {}
 	local messages = {}
 	local logs: { PlaytestLogEntry } = {}
 	local frameContentIds: { string } = {}
@@ -784,34 +1037,37 @@ end)
 		end)
 
 		if parseSuccess and parsed then
-			-- Parse error messages to extract script path and line number
-			if parsed.errors then
-				for _, errorMsg in ipairs(parsed.errors) do
+			if type(parsed.runtimeErrors) == "table" and #parsed.runtimeErrors > 0 then
+				for _, RuntimeError in ipairs(parsed.runtimeErrors) do
 					if #errors >= MaxLogs then
 						Truncated = true
 						break
 					end
-					errorMsg = TruncateMessage(errorMsg)
-					local scriptPath = "Unknown"
-					local lineNumber = nil
-
-					-- Parse "ServerScriptService.GameManager:5: error message".
-					-- Character class includes "_" so paths like "__PlaytestUserServerScript__"
-					-- or user-named scripts like "GameManager_v2" are not dropped to "Unknown".
-					local pathMatch = string.match(errorMsg, "([%w%._]+):%d+:")
-					if pathMatch then
-						scriptPath = string.gsub(pathMatch, "%.", "/")
+					if type(RuntimeError) == "table" then
+						table.insert(errors, {
+							scriptPath = RuntimeError.scriptPath,
+							studioPath = RuntimeError.studioPath,
+							scriptUniqueId = RuntimeError.scriptUniqueId,
+							lineNumber = RuntimeError.lineNumber,
+							message = TruncateMessage(RuntimeError.message),
+							stackTrace = TruncateMessage(RuntimeError.stackTrace or ""),
+							context = RuntimeError.context,
+						})
 					end
-
-					local lineMatch = string.match(errorMsg, ":(%d+):")
-					if lineMatch then
-						lineNumber = tonumber(lineMatch)
+				end
+			elseif parsed.errors then
+				-- Compatibility fallback for older playtest payloads that only return text.
+				for _, ErrorMessageValue in ipairs(parsed.errors) do
+					if #errors >= MaxLogs then
+						Truncated = true
+						break
 					end
-
+					local ErrorMessage = TruncateMessage(ErrorMessageValue)
+					local ScriptPath, LineMatch = string.match(ErrorMessage, "^%s*(.-):(%d+):")
 					table.insert(errors, {
-						scriptPath = scriptPath,
-						lineNumber = lineNumber,
-						message = errorMsg,
+						scriptPath = ScriptPath,
+						lineNumber = LineMatch and tonumber(LineMatch) or nil,
+						message = ErrorMessage,
 					})
 				end
 			end
@@ -1011,9 +1267,11 @@ end)
 	if params.compactResult and not capture then
 		return {
 			status = "completed",
+			errors = errors,
 			logs = logs,
 			duration = duration,
 			truncated = Truncated,
+			temporarySmokeTest = TemporarySmokeTestResultValue,
 		}
 	end
 
@@ -1030,6 +1288,7 @@ end)
 			captureWallMs = captureWallMs,
 			captureStartedBySignal = captureStartedBySignal,
 			truncated = Truncated,
+			temporarySmokeTest = TemporarySmokeTestResultValue,
 		}
 	end
 
@@ -1040,5 +1299,6 @@ end)
 		logs = logs,
 		duration = duration,
 		truncated = Truncated,
+		temporarySmokeTest = TemporarySmokeTestResultValue,
 	}
 end

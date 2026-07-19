@@ -232,7 +232,9 @@ function CleanupSession(Session) {
         CompletedAt: Timestamp,
         Result: {
           status: "failed",
+          errorCategory: "studio_request_timed_out",
           error: `Timed out waiting for Studio to complete ${RequestEnvelope.toolName}.`,
+          retryable: true,
         },
       });
     }
@@ -322,6 +324,8 @@ async function HandleStudioRequest(Request, Response) {
   if (!IsStudioAlive(Session)) {
     SendError(Response, 409, "Studio is not connected.", {
       SessionId: Session.SessionId,
+      ErrorCategory: "studio_disconnected",
+      Retryable: true,
     });
     return;
   }

@@ -14,7 +14,40 @@ const JsonRpcError = {
   MethodNotFound: -32601,
   InvalidParams: -32602,
   InternalError: -32603,
+  BridgeUnavailable: -32001,
+  StudioDisconnected: -32002,
+  StudioRequestTimedOut: -32003,
+  StudioActionFailed: -32004,
 };
+
+const ErrorCategory = {
+  InvalidToolArguments: "invalid_tool_arguments",
+  BridgeUnavailable: "bridge_unavailable",
+  StudioDisconnected: "studio_disconnected",
+  StudioRequestTimedOut: "studio_request_timed_out",
+  StudioActionFailed: "studio_action_failed",
+  InternalMcpFailure: "internal_mcp_failure",
+};
+
+const ErrorCodeByCategory = {
+  [ErrorCategory.InvalidToolArguments]: JsonRpcError.InvalidParams,
+  [ErrorCategory.BridgeUnavailable]: JsonRpcError.BridgeUnavailable,
+  [ErrorCategory.StudioDisconnected]: JsonRpcError.StudioDisconnected,
+  [ErrorCategory.StudioRequestTimedOut]: JsonRpcError.StudioRequestTimedOut,
+  [ErrorCategory.StudioActionFailed]: JsonRpcError.StudioActionFailed,
+  [ErrorCategory.InternalMcpFailure]: JsonRpcError.InternalError,
+};
+
+class McpToolError extends Error {
+  constructor(Category, Message, Retryable = false, Data = {}) {
+    super(Message);
+    this.name = "McpToolError";
+    this.Category = Category;
+    this.Code = ErrorCodeByCategory[Category] ?? JsonRpcError.InternalError;
+    this.Retryable = Retryable;
+    this.Data = Data;
+  }
+}
 
 const DefaultBridgeUrl = "http://127.0.0.1:17315";
 const DefaultRequestPath = "v1/studio/request";
@@ -56,8 +89,31 @@ function SendResult(Id, Result) {
   Send({ jsonrpc: "2.0", id: Id, result: Result });
 }
 
-function SendError(Id, Code, Message) {
-  Send({ jsonrpc: "2.0", id: Id, error: { code: Code, message: Message } });
+function SendError(Id, Code, Message, Data) {
+  Send({
+    jsonrpc: "2.0",
+    id: Id,
+    error: CompactObject({
+      code: Code,
+      message: Message,
+      data: Data,
+    }),
+  });
+}
+
+function InvalidToolArguments(Message, Data = {}) {
+  return new McpToolError(ErrorCategory.InvalidToolArguments, Message, false, Data);
+}
+
+function NormalizeToolError(ErrorValue) {
+  if (ErrorValue instanceof McpToolError) {
+    return ErrorValue;
+  }
+  return new McpToolError(
+    ErrorCategory.InternalMcpFailure,
+    ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue),
+    false,
+  );
 }
 
 function GetEnvString(Name, Fallback = "") {
@@ -231,14 +287,14 @@ async function EnsureBridgeListener() {
 
 function RequireObject(Value, Name) {
   if (typeof Value !== "object" || Value === null || Array.isArray(Value)) {
-    throw new Error(`${Name} must be an object.`);
+    throw InvalidToolArguments(`${Name} must be an object.`, { Argument: Name });
   }
   return Value;
 }
 
 function RequireString(Value, Name) {
   if (typeof Value !== "string" || Value.trim() === "") {
-    throw new Error(`${Name} must be a non-empty string.`);
+    throw InvalidToolArguments(`${Name} must be a non-empty string.`, { Argument: Name });
   }
   return Value.trim();
 }
@@ -248,10 +304,10 @@ function OptionalInteger(Value, Name, Minimum, Maximum) {
     return undefined;
   }
   if (!Number.isInteger(Value)) {
-    throw new Error(`${Name} must be an integer.`);
+    throw InvalidToolArguments(`${Name} must be an integer.`, { Argument: Name });
   }
   if (Value < Minimum || Value > Maximum) {
-    throw new Error(`${Name} must be between ${Minimum} and ${Maximum}.`);
+    throw InvalidToolArguments(`${Name} must be between ${Minimum} and ${Maximum}.`, { Argument: Name });
   }
   return Value;
 }
@@ -261,7 +317,7 @@ function OptionalBoolean(Value, Name) {
     return undefined;
   }
   if (typeof Value !== "boolean") {
-    throw new Error(`${Name} must be a boolean.`);
+    throw InvalidToolArguments(`${Name} must be a boolean.`, { Argument: Name });
   }
   return Value;
 }
@@ -271,9 +327,25 @@ function OptionalString(Value, Name) {
     return undefined;
   }
   if (typeof Value !== "string") {
-    throw new Error(`${Name} must be a string.`);
+    throw InvalidToolArguments(`${Name} must be a string.`, { Argument: Name });
   }
   return Value;
+}
+
+function OptionalBoundedString(Value, Name, MaximumLength) {
+  const StringValue = OptionalString(Value, Name);
+  if (StringValue !== undefined && StringValue.length > MaximumLength) {
+    throw InvalidToolArguments(`${Name} must not exceed ${MaximumLength} characters.`, { Argument: Name });
+  }
+  return StringValue;
+}
+
+function OptionalEnum(Value, Name, AllowedValues) {
+  const StringValue = OptionalString(Value, Name);
+  if (StringValue !== undefined && !AllowedValues.includes(StringValue)) {
+    throw InvalidToolArguments(`${Name} must be one of: ${AllowedValues.join(", ")}.`, { Argument: Name });
+  }
+  return StringValue;
 }
 
 function CompactObject(Value) {
@@ -500,6 +572,31 @@ function Tools() {
           type: "boolean",
           default: true,
         },
+        SmokeTestName: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          pattern: "^[A-Za-z0-9_-]+$",
+          description: "Unique smoke-test name used in the required [CODEX_SMOKE:<name>] log prefix.",
+        },
+        TemporaryServerScript: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200000,
+          description: "Bounded server smoke code injected as ServerScriptService._TemporaryCODEXScript.",
+        },
+        TemporaryLocalScript: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200000,
+          description: "Bounded client smoke code injected as _TemporaryCODEXScript for this playtest only.",
+        },
+        TemporaryClientLocation: {
+          type: "string",
+          enum: ["StarterPlayerScripts", "ReplicatedFirst"],
+          default: "StarterPlayerScripts",
+          description: "Use ReplicatedFirst only when initialization order is under test.",
+        },
       },
       [],
       { readOnlyHint: false },
@@ -650,29 +747,81 @@ function NormalizeStudioParams(ToolName, Arguments) {
         maxWidth: OptionalInteger(Args.MaxWidth, "MaxWidth", 64, 4096),
       });
     case "RunStudioTests":
-      return {
-        timeout: OptionalInteger(Args.TimeoutSeconds, "TimeoutSeconds", 1, 90) ?? 10,
-        maxLogs: OptionalInteger(Args.MaxLogs, "MaxLogs", 1, 2000) ?? 300,
-        includeMessages: OptionalBoolean(Args.IncludeMessages, "IncludeMessages") ?? true,
-        includeWarnings: OptionalBoolean(Args.IncludeWarnings, "IncludeWarnings") ?? true,
-        includeErrors: OptionalBoolean(Args.IncludeErrors, "IncludeErrors") ?? true,
-        compactResult: true,
-      };
+      {
+        const SmokeTestName = OptionalBoundedString(Args.SmokeTestName, "SmokeTestName", 64)?.trim();
+        const TemporaryServerScript = OptionalBoundedString(
+          Args.TemporaryServerScript,
+          "TemporaryServerScript",
+          200_000,
+        );
+        const TemporaryLocalScript = OptionalBoundedString(
+          Args.TemporaryLocalScript,
+          "TemporaryLocalScript",
+          200_000,
+        );
+        const TemporaryClientLocation =
+          OptionalEnum(Args.TemporaryClientLocation, "TemporaryClientLocation", [
+            "StarterPlayerScripts",
+            "ReplicatedFirst",
+          ]) ?? "StarterPlayerScripts";
+
+        if (SmokeTestName !== undefined && !/^[A-Za-z0-9_-]+$/.test(SmokeTestName)) {
+          throw InvalidToolArguments(
+            "SmokeTestName may contain only letters, numbers, underscores, and hyphens.",
+            { Argument: "SmokeTestName" },
+          );
+        }
+        if ((TemporaryServerScript !== undefined || TemporaryLocalScript !== undefined) && !SmokeTestName) {
+          throw InvalidToolArguments(
+            "SmokeTestName is required when a temporary smoke script is provided.",
+            { Argument: "SmokeTestName" },
+          );
+        }
+        if (SmokeTestName && TemporaryServerScript === undefined && TemporaryLocalScript === undefined) {
+          throw InvalidToolArguments(
+            "TemporaryServerScript or TemporaryLocalScript is required when SmokeTestName is provided.",
+            { Argument: "SmokeTestName" },
+          );
+        }
+
+        return {
+          timeout: OptionalInteger(Args.TimeoutSeconds, "TimeoutSeconds", 1, 90) ?? 10,
+          maxLogs: OptionalInteger(Args.MaxLogs, "MaxLogs", 1, 2000) ?? 300,
+          includeMessages: SmokeTestName
+            ? true
+            : (OptionalBoolean(Args.IncludeMessages, "IncludeMessages") ?? true),
+          includeWarnings: SmokeTestName
+            ? true
+            : (OptionalBoolean(Args.IncludeWarnings, "IncludeWarnings") ?? true),
+          includeErrors: SmokeTestName ? true : (OptionalBoolean(Args.IncludeErrors, "IncludeErrors") ?? true),
+          compactResult: true,
+          smokeTestName: SmokeTestName,
+          serverScript: TemporaryServerScript,
+          localScript: TemporaryLocalScript,
+          localScriptLocation: TemporaryClientLocation,
+        };
+      }
     default:
-      throw new Error(`Unsupported Studio tool: ${ToolName}`);
+      throw new McpToolError(
+        ErrorCategory.InternalMcpFailure,
+        `Unsupported Studio tool normalization: ${ToolName}`,
+      );
   }
 }
 
 function NormalizeStudioTestResult(Value, Arguments) {
   const Result = typeof Value === "object" && Value !== null ? Value : {};
   const MaxLogs = Arguments.MaxLogs ?? 300;
-  const IncludeMessages = Arguments.IncludeMessages ?? true;
-  const IncludeWarnings = Arguments.IncludeWarnings ?? true;
-  const IncludeErrors = Arguments.IncludeErrors ?? true;
+  const IsTemporarySmokeTest = typeof Arguments.SmokeTestName === "string" && Arguments.SmokeTestName !== "";
+  const IncludeMessages = IsTemporarySmokeTest || (Arguments.IncludeMessages ?? true);
+  const IncludeWarnings = IsTemporarySmokeTest || (Arguments.IncludeWarnings ?? true);
+  const IncludeErrors = IsTemporarySmokeTest || (Arguments.IncludeErrors ?? true);
   const RawLogs = Array.isArray(Result.logs) ? Result.logs : Array.isArray(Result.Logs) ? Result.Logs : [];
+  const RawErrors = Array.isArray(Result.errors) ? Result.errors : Array.isArray(Result.Errors) ? Result.Errors : [];
   const Logs = [];
   const Errors = [];
-  let ErrorCount = 0;
+  const ErrorLogEntries = [];
+  let LogErrorCount = 0;
   let WarningCount = 0;
   let MessageCount = 0;
   let Truncated = Result.truncated === true || Result.Truncated === true;
@@ -687,12 +836,47 @@ function NormalizeStudioTestResult(Value, Arguments) {
   }
 
   function ParseError(Message, Context) {
-    const Match = Message.match(/([A-Za-z0-9_.]+):(\d+):/);
+    const Text = String(Message);
+    const Patterns = [
+      /^\s*\[string\s+["'](.+?)["']\]:(\d+):/,
+      /\bScript\s+["'](.+?)["']\s*,?\s*[Ll]ine\s+(\d+)\b/,
+      /^\s*(.+?)\s*\([Ll]ine\s+(\d+)\)\s*:?/,
+      /^\s*(.+?)\s*,\s*[Ll]ine\s+(\d+)\b/,
+      /^\s*(.+?):(\d+):/,
+    ];
+    let Match;
+    for (const Line of Text.split(/\r?\n/)) {
+      Match = Patterns.map((Pattern) => Line.match(Pattern)).find(Boolean);
+      if (Match) {
+        break;
+      }
+    }
     return CompactObject({
-      ScriptPath: Match ? Match[1].replaceAll(".", "/") : "Unknown",
+      ScriptPath: Match?.[1]?.trim() || "Unknown",
       LineNumber: Match ? Number(Match[2]) : undefined,
-      Message,
+      Message: Text,
       Context,
+      Provenance: "message_fallback",
+    });
+  }
+
+  function NormalizeStructuredError(RawError) {
+    if (typeof RawError !== "object" || RawError === null) {
+      return ParseError(ClipMessage(RawError));
+    }
+
+    const StudioPath = RawError.studioPath ?? RawError.StudioPath;
+    const ScriptUniqueId = RawError.scriptUniqueId ?? RawError.ScriptUniqueId;
+    const ScriptPath = RawError.scriptPath ?? RawError.ScriptPath ?? StudioPath;
+    return CompactObject({
+      ScriptPath: ScriptPath || "Unknown",
+      StudioPath,
+      ScriptUniqueId,
+      LineNumber: RawError.lineNumber ?? RawError.LineNumber,
+      Message: ClipMessage(RawError.message ?? RawError.Message),
+      StackTrace: ClipMessage(RawError.stackTrace ?? RawError.StackTrace ?? ""),
+      Context: RawError.context ?? RawError.Context,
+      Provenance: StudioPath || ScriptUniqueId ? "studio" : "message_fallback",
     });
   }
 
@@ -702,14 +886,13 @@ function NormalizeStudioTestResult(Value, Arguments) {
     }
 
     const Level = String(RawEntry.type ?? RawEntry.Type ?? RawEntry.level ?? RawEntry.Level ?? "unknown").toLowerCase();
-    const Context = OptionalString(RawEntry.context ?? RawEntry.Context, "Log.Context");
+    const RawContext = RawEntry.context ?? RawEntry.Context;
+    const Context = typeof RawContext === "string" ? RawContext : undefined;
     const Message = ClipMessage(RawEntry.message ?? RawEntry.Message);
 
     if (Level === "error") {
-      ErrorCount += 1;
-      if (IncludeErrors) {
-        Errors.push(ParseError(Message, Context));
-      }
+      LogErrorCount += 1;
+      ErrorLogEntries.push({ Message, Context });
     } else if (Level === "warn" || Level === "warning") {
       WarningCount += 1;
     } else {
@@ -731,20 +914,13 @@ function NormalizeStudioTestResult(Value, Arguments) {
     Logs.push(CompactObject({ Level: Level === "warning" ? "warn" : Level, Message, Context }));
   }
 
-  if (RawLogs.length === 0 && IncludeErrors) {
-    const RawErrors = Array.isArray(Result.errors) ? Result.errors : Array.isArray(Result.Errors) ? Result.Errors : [];
-    ErrorCount = RawErrors.length;
+  if (IncludeErrors) {
     for (const RawError of RawErrors.slice(0, MaxLogs)) {
-      if (typeof RawError === "object" && RawError !== null) {
-        Errors.push(
-          CompactObject({
-            ScriptPath: RawError.scriptPath ?? RawError.ScriptPath ?? "Unknown",
-            LineNumber: RawError.lineNumber ?? RawError.LineNumber,
-            Message: ClipMessage(RawError.message ?? RawError.Message),
-          }),
-        );
-      } else {
-        Errors.push(ParseError(ClipMessage(RawError)));
+      Errors.push(NormalizeStructuredError(RawError));
+    }
+    if (Errors.length === 0) {
+      for (const ErrorEntry of ErrorLogEntries.slice(0, MaxLogs)) {
+        Errors.push(ParseError(ErrorEntry.Message, ErrorEntry.Context));
       }
     }
     Truncated ||= RawErrors.length > MaxLogs;
@@ -752,10 +928,42 @@ function NormalizeStudioTestResult(Value, Arguments) {
 
   const Status = String(Result.status ?? Result.Status ?? "failed");
   const DurationMs = Number(Result.duration ?? Result.Duration ?? 0);
+  const ErrorCount = Math.max(LogErrorCount, RawErrors.length);
+  const RawTemporarySmokeTest = Result.temporarySmokeTest ?? Result.TemporarySmokeTest;
+  let TemporarySmokeTest;
+
+  if (IsTemporarySmokeTest || (typeof RawTemporarySmokeTest === "object" && RawTemporarySmokeTest !== null)) {
+    const Name = Arguments.SmokeTestName ?? RawTemporarySmokeTest?.name ?? RawTemporarySmokeTest?.Name;
+    const Prefix = `[CODEX_SMOKE:${Name}]`;
+    const SmokeLogs = RawLogs.map((Entry) => ({
+      Level: String(Entry?.type ?? Entry?.Type ?? Entry?.level ?? Entry?.Level ?? "unknown").toLowerCase(),
+      Message: String(Entry?.message ?? Entry?.Message ?? ""),
+    })).filter((Entry) => Entry.Message.includes(Prefix));
+    const Completed = SmokeLogs.some((Entry) => /\bCOMPLETE\b/.test(Entry.Message));
+    const PassedAssertions = SmokeLogs.filter((Entry) => /\bPASS\b/.test(Entry.Message)).length;
+    const FailedAssertions = SmokeLogs.filter((Entry) => /\b(?:FAIL|ERROR)\b/.test(Entry.Message)).length;
+    const CleanupVerified =
+      RawTemporarySmokeTest?.cleanupVerified ?? RawTemporarySmokeTest?.CleanupVerified ?? false;
+
+    TemporarySmokeTest = {
+      Name,
+      Prefix,
+      Completed,
+      PassedAssertions,
+      FailedAssertions,
+      CleanupVerified,
+      Passed: Completed && FailedAssertions === 0 && CleanupVerified,
+      ScriptName: RawTemporarySmokeTest?.scriptName ?? RawTemporarySmokeTest?.ScriptName ?? "_TemporaryCODEXScript",
+      ServerInjected: RawTemporarySmokeTest?.serverInjected ?? RawTemporarySmokeTest?.ServerInjected ?? false,
+      ClientInjected: RawTemporarySmokeTest?.clientInjected ?? RawTemporarySmokeTest?.ClientInjected ?? false,
+      ClientLocation: RawTemporarySmokeTest?.clientLocation ?? RawTemporarySmokeTest?.ClientLocation,
+    };
+  }
+
   return CompactObject({
     Status,
     Summary: {
-      Passed: Status === "completed" && ErrorCount === 0,
+      Passed: Status === "completed" && ErrorCount === 0 && (TemporarySmokeTest?.Passed ?? true),
       ErrorCount,
       WarningCount,
       MessageCount,
@@ -763,6 +971,7 @@ function NormalizeStudioTestResult(Value, Arguments) {
     },
     Logs,
     Errors: IncludeErrors ? Errors.slice(0, MaxLogs) : [],
+    TemporarySmokeTest,
     Truncated,
     Error: Result.error ?? Result.Error,
   });
@@ -817,7 +1026,21 @@ async function PollStudioResult(RequestId, Headers, DefaultTimeoutMs = 30000) {
 
   while (Date.now() - StartedAt <= TimeoutMs) {
     for (const PathValue of UniquePaths) {
-      const Response = await HttpJson("GET", PathValue, undefined, Headers);
+      let Response;
+      try {
+        Response = await HttpJson("GET", PathValue, undefined, Headers);
+      } catch (ErrorValue) {
+        throw new McpToolError(
+          ErrorCategory.BridgeUnavailable,
+          `CodexBridge listener did not respond while polling request ${RequestId}.`,
+          true,
+          {
+            RequestId,
+            BridgeUrl: BridgeBaseUrl(),
+            Cause: ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue),
+          },
+        );
+      }
       LastStatus = `http-${Response.Status}`;
       if (Response.Status === 202 || Response.Status === 204 || Response.Status === 404) {
         continue;
@@ -832,16 +1055,63 @@ async function PollStudioResult(RequestId, Headers, DefaultTimeoutMs = 30000) {
     await new Promise((Resolve) => setTimeout(Resolve, PollMs));
   }
 
-  return {
-    status: "pending",
-    requestId: RequestId,
-    error: `Timed out waiting ${TimeoutMs}ms for Studio result (${LastStatus}).`,
-  };
+  throw new McpToolError(
+    ErrorCategory.StudioRequestTimedOut,
+    `Timed out waiting ${TimeoutMs}ms for Studio request ${RequestId}.`,
+    true,
+    { RequestId, TimeoutMs, LastStatus },
+  );
+}
+
+function RequireSuccessfulStudioResult(Result, ToolName, ActionName, RequestId) {
+  if (typeof Result !== "object" || Result === null) {
+    throw new McpToolError(
+      ErrorCategory.InternalMcpFailure,
+      `Studio returned an invalid result for ${ToolName}.`,
+      false,
+      { ToolName, ActionName, RequestId },
+    );
+  }
+
+  const Status = String(Result.status ?? Result.Status ?? "");
+  if (Status !== "failed") {
+    return Result;
+  }
+
+  const Category = Result.errorCategory ?? Result.ErrorCategory;
+  const Message = Result.error ?? Result.Error ?? `Studio action ${ActionName} failed.`;
+  if (Category === ErrorCategory.StudioRequestTimedOut) {
+    throw new McpToolError(ErrorCategory.StudioRequestTimedOut, Message, true, {
+      ToolName,
+      ActionName,
+      RequestId,
+    });
+  }
+
+  throw new McpToolError(
+    ErrorCategory.StudioActionFailed,
+    Message,
+    Result.retryable ?? Result.Retryable ?? false,
+    CompactObject({
+      ToolName,
+      ActionName,
+      RequestId,
+      StudioStackTrace: Result.stackTrace ?? Result.StackTrace,
+    }),
+  );
 }
 
 async function CallStudioAction(ToolName, Arguments) {
   const Args = RequireObject(Arguments ?? {}, "arguments");
-  await EnsureBridgeListener();
+  const ListenerReady = await EnsureBridgeListener();
+  if (!ListenerReady) {
+    throw new McpToolError(
+      ErrorCategory.BridgeUnavailable,
+      `CodexBridge listener is unavailable at ${BridgeBaseUrl()}.`,
+      true,
+      { BridgeUrl: BridgeBaseUrl() },
+    );
+  }
   const SessionId = ResolveSessionId(Args);
 
   const RequestId = `codex_${Date.now()}_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -860,26 +1130,50 @@ async function CallStudioAction(ToolName, Arguments) {
     source: "codex-mcp",
   });
 
-  const Response = await HttpJson("POST", RequestPath, Body, Headers);
+  let Response;
+  try {
+    Response = await HttpJson("POST", RequestPath, Body, Headers);
+  } catch (ErrorValue) {
+    throw new McpToolError(
+      ErrorCategory.BridgeUnavailable,
+      `CodexBridge listener did not respond at ${BridgeBaseUrl()}.`,
+      true,
+      {
+        BridgeUrl: BridgeBaseUrl(),
+        Cause: ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue),
+      },
+    );
+  }
   if (!Response.Ok) {
-    return TextResult({
-      status: "failed",
-      requestId: RequestId,
-      toolName: ToolName,
-      actionName: ActionName,
-      bridgeStatus: Response.Status,
-      error: Response.Json?.RawBody || Response.Text || Response.StatusText,
-    });
+    const ResponseCategory = Response.Json?.ErrorCategory ?? Response.Json?.errorCategory;
+    const Message = Response.Json?.Error ?? Response.Json?.error ?? Response.Json?.RawBody ?? Response.Text;
+    if (Response.Status === 409 || ResponseCategory === ErrorCategory.StudioDisconnected) {
+      throw new McpToolError(
+        ErrorCategory.StudioDisconnected,
+        Message || "Roblox Studio is not connected to CodexBridge.",
+        true,
+        { ToolName, ActionName, RequestId, SessionId: SessionId || null },
+      );
+    }
+
+    throw new McpToolError(
+      ErrorCategory.BridgeUnavailable,
+      Message || `CodexBridge listener returned HTTP ${Response.Status}.`,
+      true,
+      { ToolName, ActionName, RequestId, BridgeStatus: Response.Status },
+    );
   }
 
   const ImmediateResult = ExtractImmediateResult(Response.Json);
   if (ImmediateResult !== undefined) {
-    return TextResult(FormatToolResult(ToolName, ImmediateResult, Args));
+    const Result = RequireSuccessfulStudioResult(ImmediateResult, ToolName, ActionName, RequestId);
+    return TextResult(FormatToolResult(ToolName, Result, Args));
   }
 
   const QueuedRequestId = ExtractRequestId(Response.Json, RequestId);
   const DefaultTimeoutMs = ToolName === "RunStudioTests" ? (Params.timeout + 60) * 1000 : 30000;
-  const Result = await PollStudioResult(QueuedRequestId, Headers, DefaultTimeoutMs);
+  const PolledResult = await PollStudioResult(QueuedRequestId, Headers, DefaultTimeoutMs);
+  const Result = RequireSuccessfulStudioResult(PolledResult, ToolName, ActionName, QueuedRequestId);
   return TextResult(FormatToolResult(ToolName, Result, Args));
 }
 
@@ -893,7 +1187,7 @@ async function HandleToolCall(Id, Params) {
   }
 
   if (!Object.hasOwn(StudioToolMap, Name)) {
-    throw new Error(`Unknown tool: ${Name}`);
+    throw InvalidToolArguments(`Unknown tool: ${Name}`, { ToolName: Name });
   }
 
   SendResult(Id, await CallStudioAction(Name, Arguments));
@@ -927,11 +1221,12 @@ async function HandleRequest(Message) {
     try {
       await HandleToolCall(Id, Params);
     } catch (ErrorValue) {
-      SendError(
-        Id,
-        JsonRpcError.InvalidParams,
-        ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue),
-      );
+      const ToolError = NormalizeToolError(ErrorValue);
+      SendError(Id, ToolError.Code, ToolError.message, {
+        Category: ToolError.Category,
+        Retryable: ToolError.Retryable,
+        ...ToolError.Data,
+      });
     }
     return;
   }
@@ -966,17 +1261,25 @@ Reader.on("line", async (Line) => {
   try {
     Message = JSON.parse(Line);
   } catch (ErrorValue) {
-    SendError(null, JsonRpcError.InvalidParams, `Invalid JSON: ${String(ErrorValue)}`);
+    SendError(null, JsonRpcError.InvalidParams, `Invalid JSON: ${String(ErrorValue)}`, {
+      Category: ErrorCategory.InvalidToolArguments,
+      Retryable: false,
+    });
     return;
   }
 
   try {
     await HandleRequest(Message);
   } catch (ErrorValue) {
+    const InternalError = NormalizeToolError(ErrorValue);
     SendError(
       Message.id ?? null,
       JsonRpcError.InternalError,
-      ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue),
+      InternalError.message,
+      {
+        Category: ErrorCategory.InternalMcpFailure,
+        Retryable: false,
+      },
     );
   }
 });

@@ -71,9 +71,22 @@ Read-only MCP tools:
 
 Execution MCP tools:
 
-- `RunStudioTests`: enters a bounded Studio play session, executes the project's game scripts, and returns captured server/client output.
+- `RunStudioTests`: enters a bounded Studio play session, executes the project's game scripts, and returns captured server/client output. It can also inject an owned `_TemporaryCODEXScript` through `SmokeTestName`, `TemporaryServerScript`, or `TemporaryLocalScript` for behavior not covered by existing tests.
 
 The server sends existing Studio action names to the local bridge (`list`, `glob`, `readInstance`, `readScript`, `readGuiTree`, `serialize`, `captureScreenshot`, `playtest`) while exposing PascalCase tool names and inputs to Codex.
+
+Runtime errors captured by current Studio plugins include `StudioPath`, `ScriptUniqueId`, `LineNumber`, `StackTrace`, and server/client `Context`. Text parsing remains only as a fallback for older plugin payloads.
+
+Tool failures use distinct JSON-RPC error categories:
+
+- `invalid_tool_arguments` (`-32602`)
+- `bridge_unavailable` (`-32001`)
+- `studio_disconnected` (`-32002`)
+- `studio_request_timed_out` (`-32003`)
+- `studio_action_failed` (`-32004`)
+- `internal_mcp_failure` (`-32603`)
+
+Each error includes `Category` and `Retryable` fields in JSON-RPC error data.
 
 Example requests:
 

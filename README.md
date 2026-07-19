@@ -46,6 +46,8 @@ The Codex-facing toolset includes read-first inspection tools:
 
 It also includes `RunStudioTests`, an explicit execution tool that starts a bounded Studio playtest and captures server and client output. It does not expose arbitrary `RunCode` access.
 
+When existing tests cannot cover a runtime behavior, `RunStudioTests` can inject a reserved `_TemporaryCODEXScript` into `ServerScriptService`, `StarterPlayerScripts`, or explicitly `ReplicatedFirst`. The bridge owns cleanup, reports structured assertion markers, and requires a final clean run through the bundled skill workflow.
+
 The bridge is useful when filesystem source alone is not enough, such as inspecting live GUI hierarchy, children under script instances, Studio-assigned attributes, inserted assets, screenshots, or runtime-only Studio state.
 
 ## Requirements

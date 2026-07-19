@@ -10,7 +10,7 @@ return {
 		["private"] = true,
 		["realm"] = "shared",
 		["registry"] = "https://github.com/UpliftGames/wally-index",
-		["version"] = "2.1.142",
+		["version"] = "2.1.143",
 	},
 	["dependencies"] = {
 		["Fusion"] = "dervexhero/fusion-03-dev@0.3.0-dev.1",

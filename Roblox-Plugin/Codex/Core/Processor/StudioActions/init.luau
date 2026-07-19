@@ -336,6 +336,8 @@ function StudioActions:playtest(params: {
 	compactResult: boolean?,
 	serverScript: string?,
 	localScript: string?,
+	smokeTestName: string?,
+	localScriptLocation: string?,
 	captureFrames: {
 		count: number,
 		intervalMs: number,
@@ -346,9 +348,13 @@ function StudioActions:playtest(params: {
 	status: string,
 	errors: {
 		{
-			scriptPath: string,
+			scriptPath: string?,
+			studioPath: string?,
+			scriptUniqueId: string?,
 			lineNumber: number?,
 			message: string,
+			stackTrace: string?,
+			context: string?,
 		}
 	}?,
 	messages: { string }?,
@@ -372,6 +378,14 @@ function StudioActions:playtest(params: {
 	captureWallMs: number?,
 	captureStartedBySignal: boolean?,
 	truncated: boolean?,
+	temporarySmokeTest: {
+		name: string,
+		scriptName: string,
+		serverInjected: boolean,
+		clientInjected: boolean,
+		clientLocation: string?,
+		cleanupVerified: boolean,
+	}?,
 	error: string?,
 }
 	return playtestHandler(self, params)

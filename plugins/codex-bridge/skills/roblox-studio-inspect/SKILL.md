@@ -64,9 +64,85 @@ If a public MCP input must be lower camel case for compatibility, convert it to 
 - Treat inspection tools as read-only. `RunStudioTests` executes project scripts in a temporary Studio play session.
 - Do not use `RunCode` for normal inspection.
 - Do not run a playtest automatically while performing routine inspection.
-- Ask before any future write or destructive Studio action.
+- Temporary smoke scripts are allowed only as part of an explicitly requested test or runtime verification. Do not use them for routine inspection.
+- Ask before any other future write or destructive Studio action.
 - Do not log secrets or large script bodies unnecessarily.
 - Respect tool limits such as `MaxDepth`, `MaxNodes`, `MaxResults`, and line ranges.
+
+## Runtime Verification Levels
+
+Choose the least invasive level that covers the behavior:
+
+1. **Existing tests available:** call `RunStudioTests` without temporary source. Do not inject another test harness.
+2. **Simple runtime observation:** call `RunStudioTests` without temporary source and inspect the relevant logs, warnings, errors, or state.
+3. **No existing hook covers the behavior:** use the `_TemporaryCODEXScript` workflow below.
+
+Do not stop at "needs a Studio smoke test" when level 3 can safely verify the change.
+
+## Temporary Smoke Tests
+
+Use `RunStudioTests` with `SmokeTestName` and at least one of `TemporaryServerScript` or `TemporaryLocalScript`. The bridge creates an owned script named `_TemporaryCODEXScript`, runs it only for that bounded playtest, removes it from the edit DataModel, and reports cleanup in `TemporarySmokeTest`.
+
+Approved locations:
+
+- `TemporaryServerScript`: `ServerScriptService`.
+- `TemporaryLocalScript`: `StarterPlayerScripts` by default.
+- Set `TemporaryClientLocation` to `ReplicatedFirst` only when initialization order is specifically under test.
+
+Every temporary script must:
+
+- Print a unique prefix in the form `[CODEX_SMOKE:<SmokeTestName>]`.
+- Use bounded assertions and bounded waits.
+- Print `PASS` or `FAIL` for assertions.
+- Print `[CODEX_SMOKE:<SmokeTestName>] COMPLETE` only after every assertion finishes.
+- Avoid persistent DataStore writes, purchases, teleports, moderation actions, and external HTTP.
+- Destroy or disable runtime objects and disconnect event connections it creates.
+- Never call `StudioTestService:EndTest`; the bridge owns playtest termination and log capture.
+
+Recommended server script pattern:
+
+```luau
+local TestPrefix = "[CODEX_SMOKE:InventoryCutlass]"
+
+local function Pass(Message: string)
+	print(TestPrefix, "PASS", Message)
+end
+
+local function Fail(Message: string)
+	error(string.format("%s FAIL %s", TestPrefix, Message), 0)
+end
+
+local function Expect(Condition: boolean, Message: string)
+	if Condition then
+		Pass(Message)
+	else
+		Fail(Message)
+	end
+end
+
+local Success, Result = pcall(function()
+	local Players = game:GetService("Players")
+	Expect(Players ~= nil, "Players service is available")
+	return true
+end)
+
+if not Success then
+	warn(TestPrefix, "ERROR", Result)
+	error(Result, 0)
+end
+
+print(TestPrefix, "COMPLETE")
+```
+
+After the temporary run:
+
+1. Require `TemporarySmokeTest.Completed`, `TemporarySmokeTest.Passed`, and `TemporarySmokeTest.CleanupVerified` to be true. Script execution by itself is not success.
+2. Inspect logs containing the exact test prefix, plus all returned errors and warnings.
+3. Call `GlobInstances` with pattern `**/_TemporaryCODEXScript`; no owned temporary instances should remain.
+4. Run one final clean `RunStudioTests` call without `SmokeTestName` or temporary source.
+5. Report both the temporary result and final clean-run result.
+
+If cleanup is not verified, stop testing and report the remaining path. Do not inject another temporary script over it.
 
 ## Common Flow
 
@@ -74,4 +150,5 @@ If a public MCP input must be lower camel case for compatibility, convert it to 
 2. For UI work, call `ReadGuiTree` with `RootUniqueId` omitted to inspect `StarterGui` (`sg1`).
 3. For scripts, use `ListInstances` or `GlobInstances` to find the script, then `ReadScript`.
 4. For requested runtime verification, call `RunStudioTests` and summarize its `Summary`, `Errors`, and relevant `Logs`.
-5. If a result is truncated, narrow the root, lower the scope, or reduce the playtest duration before retrying.
+5. When no existing test covers a required behavior, follow the `_TemporaryCODEXScript` workflow and finish with a clean run.
+6. If a result is truncated, narrow the root, lower the scope, or reduce the playtest duration before retrying.
