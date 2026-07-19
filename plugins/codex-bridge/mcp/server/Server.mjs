@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const PluginManifestUrl = new URL("../../.codex-plugin/plugin.json", import.meta.url);
+const ListenerServerUrl = new URL("../../bridge/Server.mjs", import.meta.url);
 const PluginManifest = JSON.parse(await readFile(PluginManifestUrl, "utf8"));
 
 const ServerName = "CodexBridge Studio";
@@ -16,6 +19,9 @@ const JsonRpcError = {
 const DefaultBridgeUrl = "http://127.0.0.1:17315";
 const DefaultRequestPath = "v1/studio/request";
 const DefaultResultTemplate = "v1/studio/result/{RequestId}";
+const DefaultListenerStartupTimeoutMs = 5_000;
+const ListenerHealthTimeoutMs = 500;
+const LoopbackHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const SupportedTools = [
   "GetStudioSession",
   "ListInstances",
@@ -38,6 +44,9 @@ const StudioToolMap = {
   CaptureScreenshot: "captureScreenshot",
   RunStudioTests: "playtest",
 };
+
+let OwnedListenerProcess;
+let ListenerEnsurePromise;
 
 function Send(Message) {
   process.stdout.write(`${JSON.stringify(Message)}\n`);
@@ -69,6 +78,22 @@ function GetEnvNumber(Name, Fallback) {
   return Number.isFinite(Parsed) && Parsed > 0 ? Parsed : Fallback;
 }
 
+function GetEnvBoolean(Name, Fallback) {
+  const RawValue = process.env[Name];
+  if (typeof RawValue !== "string" || RawValue.trim() === "") {
+    return Fallback;
+  }
+
+  const Normalized = RawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(Normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(Normalized)) {
+    return false;
+  }
+  return Fallback;
+}
+
 function BridgeBaseUrl() {
   return GetEnvString("CODEX_BRIDGE_URL", DefaultBridgeUrl).replace(/\/+$/, "");
 }
@@ -84,6 +109,124 @@ function BridgeHeaders(ExtraHeaders = {}) {
 function JoinUrl(PathValue) {
   const CleanPath = String(PathValue ?? "").replace(/^\/+/, "");
   return `${BridgeBaseUrl()}/${CleanPath}`;
+}
+
+function Delay(DurationMs) {
+  return new Promise((Resolve) => setTimeout(Resolve, DurationMs));
+}
+
+async function IsBridgeListenerHealthy() {
+  const AbortControllerInstance = new AbortController();
+  const Timeout = setTimeout(() => AbortControllerInstance.abort(), ListenerHealthTimeoutMs);
+
+  try {
+    const Response = await fetch(JoinUrl("health"), {
+      headers: BridgeHeaders(),
+      signal: AbortControllerInstance.signal,
+    });
+    const Body = await Response.json().catch(() => undefined);
+    return Response.ok && Body?.Status === "ok" && Body?.Name === "CodexBridge";
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(Timeout);
+  }
+}
+
+function StopOwnedListener() {
+  const ListenerProcess = OwnedListenerProcess;
+  OwnedListenerProcess = undefined;
+
+  if (ListenerProcess && ListenerProcess.exitCode === null && !ListenerProcess.killed) {
+    ListenerProcess.kill();
+  }
+}
+
+async function StartBridgeListener() {
+  if (await IsBridgeListenerHealthy()) {
+    return true;
+  }
+
+  if (!GetEnvBoolean("CODEX_BRIDGE_AUTOSTART", true)) {
+    return false;
+  }
+
+  let BridgeUrl;
+  try {
+    BridgeUrl = new URL(BridgeBaseUrl());
+  } catch {
+    console.error(`CodexBridge listener autostart skipped because CODEX_BRIDGE_URL is invalid: ${BridgeBaseUrl()}`);
+    return false;
+  }
+
+  if (BridgeUrl.protocol !== "http:" || !LoopbackHosts.has(BridgeUrl.hostname)) {
+    console.error(`CodexBridge listener autostart skipped for non-loopback URL: ${BridgeBaseUrl()}`);
+    return false;
+  }
+
+  const ListenerHost = BridgeUrl.hostname.replace(/^\[|\]$/g, "");
+  const ListenerProcess = spawn(process.execPath, [fileURLToPath(ListenerServerUrl)], {
+    env: {
+      ...process.env,
+      CODEX_BRIDGE_HOST: ListenerHost,
+      CODEX_BRIDGE_PORT: BridgeUrl.port || "80",
+    },
+    stdio: ["ignore", "ignore", "inherit"],
+    windowsHide: true,
+  });
+  OwnedListenerProcess = ListenerProcess;
+
+  let SpawnError;
+  ListenerProcess.once("error", (ErrorValue) => {
+    SpawnError = ErrorValue;
+  });
+  ListenerProcess.once("exit", () => {
+    if (OwnedListenerProcess === ListenerProcess) {
+      OwnedListenerProcess = undefined;
+    }
+  });
+
+  const StartupTimeoutMs = GetEnvNumber("CODEX_BRIDGE_STARTUP_TIMEOUT_MS", DefaultListenerStartupTimeoutMs);
+  const Deadline = Date.now() + StartupTimeoutMs;
+
+  while (Date.now() < Deadline) {
+    if (await IsBridgeListenerHealthy()) {
+      console.error(`CodexBridge MCP started the local listener at ${BridgeBaseUrl()}`);
+      return true;
+    }
+    if (SpawnError) {
+      throw SpawnError;
+    }
+    if (ListenerProcess.exitCode !== null) {
+      if (await IsBridgeListenerHealthy()) {
+        return true;
+      }
+      throw new Error(`CodexBridge listener exited during startup with code ${ListenerProcess.exitCode}.`);
+    }
+    await Delay(50);
+  }
+
+  if (OwnedListenerProcess === ListenerProcess) {
+    StopOwnedListener();
+  }
+  throw new Error(`Timed out waiting ${StartupTimeoutMs}ms for the CodexBridge listener.`);
+}
+
+async function EnsureBridgeListener() {
+  if (!ListenerEnsurePromise) {
+    ListenerEnsurePromise = StartBridgeListener()
+      .catch((ErrorValue) => {
+        console.error(
+          `CodexBridge listener autostart failed: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`,
+        );
+        return false;
+      })
+      .finally(() => {
+        ListenerEnsurePromise = undefined;
+      });
+  }
+
+  return ListenerEnsurePromise;
 }
 
 function RequireObject(Value, Name) {
@@ -425,6 +568,7 @@ function ResolveSessionId(Arguments) {
 
 async function GetStudioSession(Arguments) {
   const Args = RequireObject(Arguments ?? {}, "arguments");
+  await EnsureBridgeListener();
   const SessionId = ResolveSessionId(Args);
   const Headers = BridgeHeaders({
     "X-CodexBridge-Session": SessionId,
@@ -697,6 +841,7 @@ async function PollStudioResult(RequestId, Headers, DefaultTimeoutMs = 30000) {
 
 async function CallStudioAction(ToolName, Arguments) {
   const Args = RequireObject(Arguments ?? {}, "arguments");
+  await EnsureBridgeListener();
   const SessionId = ResolveSessionId(Args);
 
   const RequestId = `codex_${Date.now()}_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -794,9 +939,22 @@ async function HandleRequest(Message) {
   SendError(Id, JsonRpcError.MethodNotFound, `Method not found: ${Method}`);
 }
 
+await EnsureBridgeListener();
+
 const Reader = readline.createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
+});
+
+Reader.once("close", StopOwnedListener);
+process.once("exit", StopOwnedListener);
+process.once("SIGINT", () => {
+  StopOwnedListener();
+  process.exit(130);
+});
+process.once("SIGTERM", () => {
+  StopOwnedListener();
+  process.exit(143);
 });
 
 Reader.on("line", async (Line) => {

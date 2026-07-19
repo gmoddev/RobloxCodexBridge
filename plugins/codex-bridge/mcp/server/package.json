@@ -3,5 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-first MCP server for the CodexBridge plugin."
+  "description": "Read-first MCP server for the CodexBridge plugin.",
+  "scripts": {
+    "test": "node --test Server.test.mjs"
+  }
 }

@@ -1,6 +1,6 @@
 {
   "name": "codex-bridge",
-  "version": "0.1.0+codex.20260719093743",
+  "version": "0.1.0+codex.20260719100125",
   "description": "Inspect and test a live Roblox Studio session from Codex through CodexBridge MCP tools.",
   "author": {
     "name": "Not_Lowest"

@@ -71,9 +71,11 @@ CodexBridgeSessionId = local
 CodexBridgeToken = ""
 ```
 
-## Start The Local Listener
+## Local Listener Startup
 
-From this repository root:
+The Codex MCP server starts the local listener automatically. No separate terminal or manual Node command is required during normal use. If a compatible listener is already running, the MCP server reuses it instead of starting another one.
+
+For listener-only development or diagnostics, it can still be started manually from this repository root:
 
 ```powershell
 cd plugins/codex-bridge
@@ -86,7 +88,7 @@ Expected output:
 CodexBridge listener running at http://127.0.0.1:17315
 ```
 
-Keep this terminal running while using the bridge.
+Set `CODEX_BRIDGE_AUTOSTART=false` on the MCP server when intentionally managing the listener yourself.
 
 Optional listener environment variables:
 
@@ -95,6 +97,8 @@ $env:CODEX_BRIDGE_HOST = "127.0.0.1"
 $env:CODEX_BRIDGE_PORT = "17315"
 $env:CODEX_BRIDGE_TOKEN = ""
 $env:CODEX_BRIDGE_MAX_BODY_BYTES = "10485760"
+$env:CODEX_BRIDGE_AUTOSTART = "true"
+$env:CODEX_BRIDGE_STARTUP_TIMEOUT_MS = "5000"
 ```
 
 Use `127.0.0.1` for normal local operation. Binding the listener to another host can expose the bridge outside the local machine.
@@ -164,9 +168,8 @@ Then open `/plugins`, install `codex-bridge`, and start a new session.
 
 ## Basic End-To-End Test
 
-1. Start the local listener.
-2. Open Roblox Studio and press the plugin connect button.
-3. In Codex, ask:
+1. Open Roblox Studio and press the plugin connect button.
+2. In Codex, ask:
 
 ```text
 Use CodexBridge and call GetStudioSession.
@@ -219,8 +222,9 @@ can hide or disconnect children that are visible in Studio but not represented b
 
 `bridge_unavailable`
 
-- Start `node bridge/Server.mjs`.
-- Confirm the listener is running on `http://127.0.0.1:17315`.
+- Confirm `CODEX_BRIDGE_URL` uses the same loopback host and port as the Studio plugin.
+- Confirm `CODEX_BRIDGE_AUTOSTART` is not disabled.
+- Start `node bridge/Server.mjs` only as a manual diagnostic fallback.
 - Check firewall or local security prompts.
 
 `waiting_for_studio`

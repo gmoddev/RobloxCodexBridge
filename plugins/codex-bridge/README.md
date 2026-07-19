@@ -8,7 +8,9 @@ CodexBridge is shared as an experimental local developer tool derived from the l
 
 Full setup docs live in the repository root at `docs/CodexBridgeSetupGuide.md`.
 
-Start the local CodexBridge listener from the plugin root:
+The MCP server starts the local CodexBridge listener automatically and reuses a compatible listener if one is already running. A separate terminal is not required.
+
+For listener-only development or diagnostics, it can still be started manually from the plugin root:
 
 ```powershell
 node bridge/Server.mjs
@@ -31,10 +33,12 @@ Optional environment variables:
 - `CODEX_BRIDGE_PORT`: local listener port, defaults to `17315`.
 - `CODEX_BRIDGE_HOST`: local listener host, defaults to `127.0.0.1`.
 - `CODEX_BRIDGE_TOKEN`: optional loopback auth token. If set on the listener, set it for the MCP server too.
+- `CODEX_BRIDGE_AUTOSTART`: defaults to `true`; set to `false` to manage the listener manually.
+- `CODEX_BRIDGE_STARTUP_TIMEOUT_MS`: defaults to `5000`.
 
 ## Local Listener
 
-The listener is implemented at `bridge/Server.mjs`.
+The listener is implemented at `bridge/Server.mjs` and is supervised by `mcp/server/Server.mjs` during normal use.
 
 Implemented endpoints:
 
