@@ -1,7 +1,7 @@
 {
-  "name": "Roblox-Codex Link",
+  "name": "RobloLink",
   "interface": {
-    "displayName": "Codex Local Plugins"
+    "displayName": "Codex Roblox Link"
   },
   "plugins": [
     {

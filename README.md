@@ -27,7 +27,8 @@ plugins/codex-bridge/
   mcp/server/Server.mjs    # Codex-facing MCP server
   skills/                  # Codex skill instructions
 
-.agents/marketplace.json   # Local Codex plugin marketplace entry
+.agents/plugins/marketplace.json
+                           # Local Codex plugin marketplace entry
 ```
 
 ## What It Can Do
@@ -140,7 +141,7 @@ After pressing connect in the Roblox Studio plugin:
 
 ## Install The Codex Plugin
 
-This repo includes a local Codex marketplace file at `.agents/marketplace.json`. In the ChatGPT/Codex desktop app:
+This repo includes a local Codex marketplace file at `.agents/plugins/marketplace.json`. In the ChatGPT/Codex desktop app:
 
 1. Restart the app after cloning or changing the marketplace file.
 2. Open Codex or Work mode.
@@ -232,4 +233,3 @@ Tool calls time out
 Deep `ListInstances` calls return empty
 
 - Use smaller `MaxDepth` values and walk child nodes in chunks. The bridge can handle this more reliably for large trees.
-
