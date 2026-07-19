@@ -20,7 +20,7 @@
     "displayName": "CodexBridge",
     "shortDescription": "Inspect and test Roblox Studio projects",
     "longDescription": "Use Codex to inspect live Roblox Studio hierarchy, scripts, GUI trees, serialized instances, screenshots, and bounded playtest output through the CodexBridge Studio bridge.",
-    "developerName": "CodexBridge",
+    "developerName": "Not_Lowest",
     "category": "Developer Tools",
     "capabilities": [
       "Interactive",
