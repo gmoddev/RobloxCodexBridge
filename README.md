@@ -186,23 +186,6 @@ Use CodexBridge to list the children of Workspace.
 
 The root Workspace id is usually `ws1`.
 
-## Sharing The Plugin
-
-To share this without selling it, publish the repository or a dedicated plugin marketplace repository with:
-
-- `.agents/marketplace.json`
-- `plugins/codex-bridge/`
-- `Roblox-Plugin/Codex.rbxmx`
-- this README
-
-Other users can add the marketplace with:
-
-```powershell
-codex plugin marketplace add owner/repo
-```
-
-Sharing a local Codex plugin through a marketplace source does not publish it to the public Plugins Directory. It gives other developers an installable source for their own Codex environment.
-
 ## Important Sync Rule
 
 Preserve folder-backed ModuleScript shape:
