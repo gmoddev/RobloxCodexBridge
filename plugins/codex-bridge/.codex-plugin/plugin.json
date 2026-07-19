@@ -32,6 +32,8 @@
       "List children under this live Studio object"
     ],
     "brandColor": "#FFE066",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
     "screenshots": []
   }
 }
