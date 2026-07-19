@@ -2,9 +2,11 @@
 
 This is a Codex plugin, not a Roblox Studio plugin. It bridges Codex to a running Roblox Studio plugin through a read-first MCP server and a local CodexBridge listener.
 
+CodexBridge is shared as an experimental local developer tool derived from the lemonade.gg plugin codebase. The goal is to use this as a practical starting point for Codex-to-Studio integration while a separate standalone plugin is developed over time.
+
 ## Setup
 
-Full setup docs live in `docs/CodexBridgeSetupGuide.md`.
+Full setup docs live in the repository root at `docs/CodexBridgeSetupGuide.md`.
 
 Start the local CodexBridge listener from the plugin root:
 
@@ -65,9 +67,9 @@ Read-only MCP tools:
 
 The server sends existing Studio action names to the local bridge (`list`, `glob`, `readInstance`, `readScript`, `readGuiTree`, `serialize`, `captureScreenshot`) while exposing PascalCase tool names and inputs to Codex.
 
-## Important Sync Rule
+## Module Shape Rule
 
-Codex must preserve folder-backed module shape:
+When syncing or inspecting source, preserve folder-backed module shape:
 
 ```text
 SomeModule/
@@ -75,4 +77,4 @@ SomeModule/
   Child.luau
 ```
 
-Do not flatten that into `SomeModule.luau`; it can hide or disconnect children that are only visible in Studio.
+Flattening that into `SomeModule.luau` can hide or disconnect children that are only visible in Studio.

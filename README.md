@@ -11,7 +11,7 @@ The local route looks like this:
 Codex MCP server -> local CodexBridge listener -> Roblox Studio plugin
 ```
 
-This repository is for local developer use. It is not a public Roblox Creator Store package and is not intended to be sold. The Studio plugin was retrofitted from an existing plugin, so keep attribution and licensing clear when sharing it.
+CodexBridge is shared as an experimental local developer tool derived from the lemonade.gg plugin codebase. The goal is to use this as a practical starting point for Codex-to-Studio integration while a separate standalone plugin is developed over time.
 
 ## Repository Layout
 
@@ -95,7 +95,7 @@ $env:CODEX_BRIDGE_TOKEN = ""
 $env:CODEX_BRIDGE_MAX_BODY_BYTES = "10485760"
 ```
 
-Keep the host on `127.0.0.1` unless you intentionally want to expose the bridge beyond your machine.
+Use `127.0.0.1` for normal local operation. Binding the listener to another host can expose the bridge outside the local machine.
 
 ## Verify The Listener
 
@@ -187,7 +187,7 @@ Use CodexBridge to list the children of Workspace.
 
 The root Workspace id is usually `ws1`.
 
-## Important Sync Rule
+## Module Shape Rule
 
 Preserve folder-backed ModuleScript shape:
 
@@ -197,13 +197,13 @@ SomeModule/
   Child.luau
 ```
 
-Do not flatten that into:
+Flattening that into:
 
 ```text
 SomeModule.luau
 ```
 
-Flattening can hide or disconnect children that are visible in Studio but not represented by a single source file.
+can hide or disconnect children that are visible in Studio but not represented by a single source file.
 
 ## Troubleshooting
 
