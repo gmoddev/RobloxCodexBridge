@@ -1,4 +1,4 @@
---!strict
+
 -- patternUtils.spec.luau
 -- Unit tests for glob pattern matching utilities
 -- Tests define CORRECT behavior — some will FAIL against the current implementation

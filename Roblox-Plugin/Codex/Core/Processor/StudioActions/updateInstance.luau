@@ -1,4 +1,4 @@
---!strict
+
 -- updateInstance: Modify instance attributes/properties
 
 local Codex = script:FindFirstAncestor("Codex")

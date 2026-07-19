@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for ReadProcessor to ensure correct parent ID handling
 
 return function()

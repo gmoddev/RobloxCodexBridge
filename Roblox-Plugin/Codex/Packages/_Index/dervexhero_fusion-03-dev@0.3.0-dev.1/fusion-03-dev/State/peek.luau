@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	A common interface for accessing the values of state objects or constants.

@@ -1,4 +1,4 @@
---!strict
+
 -- Integration tests for PropertySerializer and PropertyConverter round-trip compatibility
 -- Tests that values serialized by PropertySerializer can be correctly deserialized by PropertyConverter
 

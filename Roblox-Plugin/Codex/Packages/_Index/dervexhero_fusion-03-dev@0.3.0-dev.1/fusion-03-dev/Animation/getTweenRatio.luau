@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Given a `tweenInfo` and `currentTime`, returns a ratio which can be used to

@@ -1,4 +1,4 @@
---!strict
+
 -- serialize: Capture complete instance state for rollback undo
 -- Used by operation-based rollback system (Task 048 - LEMON-1052)
 -- Captures instance, properties, attributes, script source, and all descendants

@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Cleans up the tasks passed in as the arguments.

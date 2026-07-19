@@ -1,4 +1,4 @@
---!strict
+
 -- StudioActions.spec.luau
 -- Unit tests for Studio action handlers
 

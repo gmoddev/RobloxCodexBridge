@@ -1,4 +1,4 @@
---!strict
+
 -- editScript: Edit existing script by replacing specific text
 
 local Codex = script:FindFirstAncestor("Codex")

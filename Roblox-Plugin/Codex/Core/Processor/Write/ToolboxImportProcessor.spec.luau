@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for ToolboxImportProcessor based on real poll response data from debug/no-create-instance-after-toolbox-import.log
 
 return function()

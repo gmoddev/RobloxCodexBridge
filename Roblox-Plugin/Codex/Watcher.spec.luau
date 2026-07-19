@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for Watcher.__tagInstance — duplicate uniqueId handling
 
 return function()

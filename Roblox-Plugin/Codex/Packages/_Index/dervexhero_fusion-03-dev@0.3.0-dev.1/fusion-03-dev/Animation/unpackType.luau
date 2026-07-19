@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Unpacks an animatable type into an array of numbers.

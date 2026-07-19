@@ -1,4 +1,4 @@
---!strict
+
 -- glob: Find instances matching glob pattern
 -- Optimized: Early exit, deferred path computation, time-based yielding
 

@@ -1,4 +1,4 @@
---!strict
+
 -- delete: Remove any instance or script
 
 local Codex = script:FindFirstAncestor("Codex")

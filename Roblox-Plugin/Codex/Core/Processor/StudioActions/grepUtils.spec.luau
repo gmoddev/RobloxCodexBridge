@@ -1,4 +1,4 @@
---!strict
+
 -- grepUtils.spec.luau
 -- Unit tests for grep utility functions, focusing on extractContext and contextLines param
 

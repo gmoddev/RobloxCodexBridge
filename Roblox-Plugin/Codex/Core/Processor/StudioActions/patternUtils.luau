@@ -1,4 +1,4 @@
---!strict
+
 -- Pattern matching utilities for glob-style patterns
 -- Converts glob patterns to Lua patterns and provides matching functionality
 

@@ -1,4 +1,4 @@
---!strict
+
 --[[
 	Generate unique instance IDs using base32 alphabet (12 characters)
 	Follows vm-file-representation.md spec for consistent ID generation

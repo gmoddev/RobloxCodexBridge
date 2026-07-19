@@ -1,4 +1,4 @@
---!strict
+
 -- PropertySerializer: Converts Roblox property values to server API format
 -- This is the REVERSE of PropertyConverter (which converts server → Roblox)
 -- Used when pushing property changes from Studio to the server

@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for PropertyConverter module
 
 return function()

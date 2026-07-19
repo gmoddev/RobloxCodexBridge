@@ -1,4 +1,4 @@
---!strict
+
 -- runCode: Execute arbitrary Luau code in Studio Edit context
 --
 -- Uses loadstring to compile and execute code directly in the plugin context.

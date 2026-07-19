@@ -1,4 +1,4 @@
---!strict
+
 -- importAsset: Import Roblox Toolbox asset by ID
 
 local Codex = script:FindFirstAncestor("Codex")

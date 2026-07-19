@@ -1,4 +1,4 @@
---!strict
+
 -- list: Browse Studio hierarchy and children across instances and scripts
 -- Optimized: Skip heavy folders, maxResults limit
 

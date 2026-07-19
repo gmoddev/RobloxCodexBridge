@@ -1,4 +1,4 @@
---!strict
+
 -- Require Log module
 local Codex = script:FindFirstAncestor("Codex")
 local Log = require(Codex.Log)

@@ -1,4 +1,4 @@
---!strict
+
 -- grep: Search script source code for text or Lua patterns
 -- Optimized: Early exit, deferred path/ID, time-based yielding, maxMatchesPerScript
 

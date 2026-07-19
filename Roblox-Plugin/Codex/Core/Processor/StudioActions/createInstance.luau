@@ -1,4 +1,4 @@
---!strict
+
 -- createInstance: Create non-script instances (Folder, Part, RemoteEvent, etc.)
 
 local Codex = script:FindFirstAncestor("Codex")

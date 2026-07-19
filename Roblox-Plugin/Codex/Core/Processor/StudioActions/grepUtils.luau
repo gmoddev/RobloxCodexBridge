@@ -1,4 +1,4 @@
---!strict
+
 -- Grep utilities for searching script content
 -- Optimized: Lowercase once, configurable maxMatchesPerScript, quick contains check
 

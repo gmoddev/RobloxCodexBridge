@@ -1,4 +1,4 @@
---!strict
+
 --!nolint LocalShadow
 
 --[[

@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Extended typeof, designed for identifying custom objects.

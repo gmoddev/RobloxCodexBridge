@@ -1,4 +1,4 @@
---!strict
+
 -- renderContentId: Render a Roblox `rbxtemp://` (or other resolvable) content ID
 -- to a base64-encoded RGBA buffer using EditableImage.
 --

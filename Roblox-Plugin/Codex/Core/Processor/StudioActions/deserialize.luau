@@ -1,4 +1,4 @@
---!strict
+
 -- deserialize: Recreate instance from serialized data during rollback
 -- Used by operation-based rollback system (Task 048 - LEMON-1052)
 -- Recreates instance, properties, attributes, script source, and all descendants

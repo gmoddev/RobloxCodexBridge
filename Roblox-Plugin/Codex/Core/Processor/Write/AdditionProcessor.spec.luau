@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for AdditionProcessor based on real poll response data from debug/plugin-normal.log
 
 return function()

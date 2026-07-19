@@ -1,4 +1,4 @@
---!strict
+
 --[[
 	generateUniqueId.luau
 

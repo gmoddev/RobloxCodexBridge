@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Core/init.luau

@@ -1,4 +1,4 @@
---!strict
+
 -- StudioActions: Orchestrates all Studio action tool handlers
 -- Executes actions in Roblox Studio and returns results to agent
 -- Includes operation-based rollback support via serialize/deserialize (Task 048)

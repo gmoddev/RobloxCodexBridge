@@ -1,4 +1,4 @@
---!strict
+
 -- RecordingManager: Manages ChangeHistoryService recordings for agent execution sessions
 -- Supports multiple recordings within the same session by using sessionId + timestamp as unique identifier
 

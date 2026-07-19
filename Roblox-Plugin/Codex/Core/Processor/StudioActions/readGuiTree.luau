@@ -1,4 +1,4 @@
---!strict
+
 -- readGuiTree: Read a bounded GUI subtree for Codex inspection.
 
 local Codex = script:FindFirstAncestor("Codex")

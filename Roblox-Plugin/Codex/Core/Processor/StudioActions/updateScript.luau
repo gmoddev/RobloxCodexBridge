@@ -1,4 +1,4 @@
---!strict
+
 -- updateScript: Update existing script source code
 
 local Codex = script:FindFirstAncestor("Codex")

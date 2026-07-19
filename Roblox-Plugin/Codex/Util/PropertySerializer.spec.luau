@@ -1,4 +1,4 @@
---!strict
+
 -- Unit tests for PropertySerializer
 
 return function()

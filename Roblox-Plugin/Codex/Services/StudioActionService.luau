@@ -1,4 +1,4 @@
---!strict
+
 -- StudioActionService: Connects Roblox Studio to the local CodexBridge listener.
 -- Responsible for registering the Studio session, polling for action requests,
 -- executing existing StudioActions handlers, and posting results back locally.

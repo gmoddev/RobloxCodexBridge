@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	A special key for property tables, which allows users to connect to

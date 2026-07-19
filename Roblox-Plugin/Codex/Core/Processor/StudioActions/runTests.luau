@@ -1,4 +1,4 @@
---!strict
+
 -- runTests: Execute game simulation and capture errors
 --
 -- Uses RunService to start the game (like pressing Play) and LogService.MessageOut

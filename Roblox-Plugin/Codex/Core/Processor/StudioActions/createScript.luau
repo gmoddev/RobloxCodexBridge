@@ -1,4 +1,4 @@
---!strict
+
 -- createScript: Create new Script/LocalScript/ModuleScript
 
 local Codex = script:FindFirstAncestor("Codex")

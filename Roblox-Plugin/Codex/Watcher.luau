@@ -1,4 +1,4 @@
---!strict
+
 --[[
 	Lightweight Watcher: Auto-tags new Studio instances with Codex unique IDs
 

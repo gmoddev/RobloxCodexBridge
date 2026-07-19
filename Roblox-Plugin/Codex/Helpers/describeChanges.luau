@@ -1,4 +1,4 @@
---!strict
+
 local Codex = script:FindFirstAncestor("Codex")
 local App = Codex.App
 

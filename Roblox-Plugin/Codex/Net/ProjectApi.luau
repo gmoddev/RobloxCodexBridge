@@ -1,4 +1,4 @@
---!strict
+
 local HttpCore = require(script.Parent.HttpCore)
 local HttpService = game:GetService("HttpService")
 

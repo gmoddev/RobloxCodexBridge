@@ -1,4 +1,4 @@
---!strict
+
 -- readInstance: Query instance metadata (class, attributes, properties)
 
 local Codex = script:FindFirstAncestor("Codex")

@@ -1,4 +1,4 @@
---!strict
+
 -- Tree.spec.luau
 -- Unit tests for Tree, focused on uniqueId resolution self-healing
 -- (Phase 1: getInstance slow-path) and duplicate-id collision handling

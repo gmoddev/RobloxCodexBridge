@@ -1,4 +1,4 @@
---!strict
+
 -- Simple logging configuration - single source of truth
 
 local LogConfig = {

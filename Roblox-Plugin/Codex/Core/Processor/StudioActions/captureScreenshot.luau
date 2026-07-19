@@ -1,4 +1,4 @@
---!strict
+
 -- captureScreenshot: Runs the UI Builder LocalScript in edit mode (targeting CoreGui)
 -- and captures a screenshot of the rendered GUI.
 --

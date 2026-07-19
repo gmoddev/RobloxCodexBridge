@@ -1,4 +1,4 @@
---!strict
+
 -- readScript: Retrieve script source code
 
 local Codex = script:FindFirstAncestor("Codex")

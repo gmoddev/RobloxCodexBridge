@@ -1,4 +1,4 @@
---!strict
+
 
 -- UniqueIdHelpers: Centralized utilities for managing the CodexUniqueID attribute
 -- with backwards compatibility for the old "_CodexUniqueId" and "uniqueId" attributes.

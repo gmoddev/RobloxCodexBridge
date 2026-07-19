@@ -1,4 +1,4 @@
---!strict
+
 -- Partial types for Promise
 
 local Promise = require(script.Parent.Promise) :: any

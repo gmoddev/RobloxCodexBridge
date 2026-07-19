@@ -1,4 +1,4 @@
---!strict
+
 -- importRbxm: Import .rbxm binary data into Studio
 -- Uses SerializationService:DeserializeInstancesAsync to recreate instances
 -- Unlike importAsset, this does NOT strip scripts — .rbxm files are trusted developer content

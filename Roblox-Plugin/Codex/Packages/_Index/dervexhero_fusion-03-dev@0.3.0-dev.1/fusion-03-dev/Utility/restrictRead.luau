@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Restricts the reading of missing members for a table.

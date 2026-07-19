@@ -1,4 +1,4 @@
---!strict
+
 --[[
 	Changes.luau
 

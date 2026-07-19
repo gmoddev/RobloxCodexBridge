@@ -1,4 +1,4 @@
---!strict
+
 -- move: Relocate or rename any instance or script
 
 local Codex = script:FindFirstAncestor("Codex")

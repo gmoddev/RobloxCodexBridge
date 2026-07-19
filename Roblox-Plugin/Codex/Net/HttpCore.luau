@@ -1,4 +1,4 @@
---!strict
+
 
 local HttpService = game:GetService("HttpService")
 local plugin = script:FindFirstAncestorWhichIsA("Plugin")

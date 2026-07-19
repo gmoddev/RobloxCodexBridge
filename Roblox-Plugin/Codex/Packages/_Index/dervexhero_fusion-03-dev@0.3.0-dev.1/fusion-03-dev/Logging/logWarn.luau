@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	Utility function to log a Fusion-specific warning.

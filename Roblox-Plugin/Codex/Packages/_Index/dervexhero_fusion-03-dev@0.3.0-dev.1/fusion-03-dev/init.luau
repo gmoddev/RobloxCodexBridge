@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	The entry point for the Fusion library.

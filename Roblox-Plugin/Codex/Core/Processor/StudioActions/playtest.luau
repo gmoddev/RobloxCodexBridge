@@ -1,4 +1,4 @@
---!strict
+
 -- playtest: Run the game in sandboxed play mode and capture all logs.
 --
 -- Uses StudioTestService:ExecutePlayModeAsync for sandboxed play (state reverts after stop).

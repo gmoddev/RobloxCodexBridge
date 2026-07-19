@@ -1,4 +1,4 @@
---!strict
+
 local Codex = script:FindFirstAncestor("Codex")
 local Tree = require(Codex.Core.Tree) -- Assuming Tree type definition is accessible
 -- local Types = require(Codex.Types) -- For Ref type if needed -- Removed unused variable

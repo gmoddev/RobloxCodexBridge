@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 	An xpcall() error handler to collect and parse useful information about

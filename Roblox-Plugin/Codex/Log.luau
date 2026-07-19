@@ -1,4 +1,4 @@
---!strict
+
 local LogConfig = require(script.Parent.LogConfig)
 local Codex = script:FindFirstAncestor("Codex")
 

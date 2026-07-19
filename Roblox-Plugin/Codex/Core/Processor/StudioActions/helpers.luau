@@ -1,4 +1,4 @@
---!strict
+
 -- Shared helper functions for Studio action handlers
 
 local Codex = script:FindFirstAncestor("Codex")

@@ -1,4 +1,4 @@
---!strict
+
 -- batchRollback: Execute multiple rollback operations atomically
 -- Task 048 - LEMON-1052: Operation-based rollback with event sourcing
 -- Processes all operations in order, returns per-operation success/failure

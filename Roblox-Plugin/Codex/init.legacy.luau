@@ -1,4 +1,4 @@
---!strict
+
 
 --[[
 Not_Lowest + Lemonade (https://lemonade.gg)
