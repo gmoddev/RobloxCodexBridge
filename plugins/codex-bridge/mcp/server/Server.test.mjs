@@ -403,6 +403,96 @@ Test("MCP preserves Studio error provenance and summarizes temporary smoke marke
   }
 });
 
+Test("MCP compiles RunInputScenario into a temporary playtest LocalScript", { timeout: 15_000 }, async () => {
+  const Port = await GetFreePort();
+  const BaseUrl = `http://127.0.0.1:${Port}`;
+  let CapturedBody;
+  const Bridge = await StartFakeBridge(Port, (_Request, Body) => {
+    CapturedBody = Body;
+    return {
+      StatusCode: 200,
+      Body: {
+        result: {
+          status: "completed",
+          duration: 51,
+          logs: [
+            { type: "print", message: "[CODEX_SMOKE:InputInteract] PASS Key input sent", context: "client" },
+            { type: "print", message: "[CODEX_SMOKE:InputInteract] PASS Property matched", context: "client" },
+            { type: "print", message: "[CODEX_SMOKE:InputInteract] COMPLETE", context: "client" },
+          ],
+          temporarySmokeTest: {
+            name: "InputInteract",
+            scriptName: "_TemporaryCODEXScript",
+            serverInjected: false,
+            clientInjected: true,
+            clientLocation: "StarterPlayerScripts",
+            cleanupVerified: true,
+          },
+        },
+      },
+    };
+  });
+  const McpProcess = SpawnMcpServer(BaseUrl);
+
+  try {
+    await InitializeMcp(McpProcess);
+    const Response = await CallTool(McpProcess, "RunInputScenario", {
+      SmokeTestName: "InputInteract",
+      TimeoutSeconds: 8,
+      Steps: [
+        { Kind: "WaitForPlayer" },
+        { Kind: "Key", KeyCode: "E", IsPressed: true },
+        { Kind: "Wait", Seconds: 0.1 },
+        { Kind: "Key", KeyCode: "E", IsPressed: false },
+      ],
+      Assertions: [
+        {
+          Kind: "AssertProperty",
+          Path: "ReplicatedStorage.InputState",
+          Property: "Value",
+          Equals: true,
+        },
+      ],
+    });
+    const Result = JSON.parse(Response.result.content[0].text);
+
+    Assert.equal(CapturedBody.toolName, "playtest");
+    Assert.equal(CapturedBody.params.timeout, 8);
+    Assert.equal(CapturedBody.params.smokeTestName, "InputInteract");
+    Assert.equal(CapturedBody.params.localScriptLocation, "StarterPlayerScripts");
+    Assert.equal(CapturedBody.params.serverScript, undefined);
+    Assert.match(CapturedBody.params.localScript, /UserInputService:CreateVirtualInput\(\)/);
+    Assert.match(CapturedBody.params.localScript, /SendKey\(Enum\.KeyCode\.E, true, false\)/);
+    Assert.match(CapturedBody.params.localScript, /AssertProperty\("ReplicatedStorage\.InputState", "Value", true, 5\)/);
+    Assert.equal(Result.TemporarySmokeTest.Passed, true);
+    Assert.equal(Result.TemporarySmokeTest.ClientInjected, true);
+  } finally {
+    await StopProcess(McpProcess);
+    await StopServer(Bridge);
+  }
+});
+
+Test("MCP rejects RunInputScenario without assertions", { timeout: 15_000 }, async () => {
+  const Port = await GetFreePort();
+  const BaseUrl = `http://127.0.0.1:${Port}`;
+  const McpProcess = SpawnMcpServer(BaseUrl);
+
+  try {
+    await WaitForHealth(BaseUrl, true);
+    await InitializeMcp(McpProcess);
+    const Response = await CallTool(McpProcess, "RunInputScenario", {
+      SmokeTestName: "InputNoAssert",
+      Steps: [{ Kind: "Key", KeyCode: "E", IsPressed: true }],
+    });
+
+    Assert.equal(Response.error.code, -32602);
+    Assert.equal(Response.error.data.Category, "invalid_tool_arguments");
+    Assert.equal(Response.error.data.Argument, "Assertions");
+  } finally {
+    await StopProcess(McpProcess);
+  }
+});
+
 Test("MCP fallback parser preserves paths with spaces and punctuation", { timeout: 15_000 }, async () => {
   const Port = await GetFreePort();
   const BaseUrl = `http://127.0.0.1:${Port}`;

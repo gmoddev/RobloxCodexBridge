@@ -48,6 +48,8 @@ It also includes `RunStudioTests`, an explicit execution tool that starts a boun
 
 When existing tests cannot cover a runtime behavior, `RunStudioTests` can inject a reserved `_TemporaryCODEXScript` into `ServerScriptService`, `StarterPlayerScripts`, or explicitly `ReplicatedFirst`. The bridge owns cleanup, reports structured assertion markers, and requires a final clean run through the bundled skill workflow.
 
+For input binding checks, `RunInputScenario` compiles declarative keyboard, mouse, text, pointer, and Input Action System steps into a temporary LocalScript, then routes through the same bounded `RunStudioTests` playtest path.
+
 The bridge is useful when filesystem source alone is not enough, such as inspecting live GUI hierarchy, children under script instances, Studio-assigned attributes, inserted assets, screenshots, or runtime-only Studio state.
 
 ## Requirements
@@ -201,6 +203,12 @@ Use CodexBridge to run a 10 second Studio test and summarize any errors or warni
 ```
 
 `RunStudioTests` enters Studio play mode and executes the project's game scripts. Play-mode state is discarded when the test ends.
+
+To test a binding through simulated player input, ask:
+
+```text
+Use CodexBridge to run an input scenario for the E interact binding.
+```
 
 ## Module Shape Rule
 

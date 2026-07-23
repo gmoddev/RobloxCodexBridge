@@ -27,7 +27,7 @@ Optional environment variables:
 - `CODEX_BRIDGE_URL`: defaults to `http://127.0.0.1:17315`.
 - `CODEX_BRIDGE_REQUEST_PATH`: defaults to `v1/studio/request`.
 - `CODEX_BRIDGE_RESULT_TEMPLATE`: defaults to `v1/studio/result/{RequestId}`.
-- `CODEX_BRIDGE_RESULT_TIMEOUT_MS`: optional global result timeout override. Read tools default to `30000`; `RunStudioTests` defaults to its play duration plus 60 seconds.
+- `CODEX_BRIDGE_RESULT_TIMEOUT_MS`: optional global result timeout override. Read tools default to `30000`; `RunStudioTests` and `RunInputScenario` default to their play duration plus 60 seconds.
 - `CODEX_BRIDGE_RESULT_POLL_MS`: defaults to `1000`.
 - `CODEX_BRIDGE_HTTP_TIMEOUT_MS`: defaults to `20000`.
 - `CODEX_BRIDGE_PORT`: local listener port, defaults to `17315`.
@@ -72,6 +72,7 @@ Read-only MCP tools:
 Execution MCP tools:
 
 - `RunStudioTests`: enters a bounded Studio play session, executes the project's game scripts, and returns captured server/client output. It can also inject an owned `_TemporaryCODEXScript` through `SmokeTestName`, `TemporaryServerScript`, or `TemporaryLocalScript` for behavior not covered by existing tests.
+- `RunInputScenario`: compiles declarative input steps and assertions into a temporary LocalScript, then runs the same bounded `playtest` path as `RunStudioTests`. It supports keyboard, mouse, text, pointer, and Input Action System `InputBinding:Fire()` scenarios without adding another Studio execution surface.
 
 The server sends existing Studio action names to the local bridge (`list`, `glob`, `readInstance`, `readScript`, `readGuiTree`, `serialize`, `captureScreenshot`, `playtest`) while exposing PascalCase tool names and inputs to Codex.
 
@@ -94,6 +95,7 @@ Example requests:
 @codex run the Studio test and show me the output
 @codex run a 15 second Studio playtest and summarize errors
 @codex check the current Studio session, then run tests
+@codex use CodexBridge to run an input scenario for the E interact binding
 ```
 
 ## Module Shape Rule

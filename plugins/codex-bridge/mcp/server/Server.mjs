@@ -65,6 +65,7 @@ const SupportedTools = [
   "SerializeInstance",
   "CaptureScreenshot",
   "RunStudioTests",
+  "RunInputScenario",
 ];
 
 const StudioToolMap = {
@@ -76,7 +77,35 @@ const StudioToolMap = {
   SerializeInstance: "serialize",
   CaptureScreenshot: "captureScreenshot",
   RunStudioTests: "playtest",
+  RunInputScenario: "playtest",
 };
+
+const InputScenarioStepKinds = [
+  "WaitForPlayer",
+  "WaitForCharacter",
+  "WaitForPath",
+  "Wait",
+  "Key",
+  "MouseMove",
+  "MouseButton",
+  "TextInput",
+  "PointerAction",
+  "InputBindingFire",
+  "AssertPathExists",
+  "AssertAttribute",
+  "AssertProperty",
+  "AssertLogContains",
+];
+const InputScenarioAssertionKinds = [
+  "AssertPathExists",
+  "AssertAttribute",
+  "AssertProperty",
+  "AssertLogContains",
+];
+const InputScenarioMouseButtons = ["MouseButton1", "MouseButton2", "MouseButton3"];
+const MaxInputScenarioSteps = 100;
+const MaxInputScenarioAssertions = 50;
+const MaxInputScenarioSourceLength = 200_000;
 
 let OwnedListenerProcess;
 let ListenerEnsurePromise;
@@ -348,6 +377,505 @@ function OptionalEnum(Value, Name, AllowedValues) {
   return StringValue;
 }
 
+function RequireArray(Value, Name, MinimumLength, MaximumLength) {
+  if (!Array.isArray(Value)) {
+    throw InvalidToolArguments(`${Name} must be an array.`, { Argument: Name });
+  }
+  if (Value.length < MinimumLength || Value.length > MaximumLength) {
+    throw InvalidToolArguments(
+      `${Name} must contain between ${MinimumLength} and ${MaximumLength} entries.`,
+      { Argument: Name },
+    );
+  }
+  return Value;
+}
+
+function OptionalArray(Value, Name, MaximumLength) {
+  if (Value === undefined || Value === null) {
+    return [];
+  }
+  return RequireArray(Value, Name, 0, MaximumLength);
+}
+
+function RequireFiniteNumber(Value, Name, Minimum, Maximum) {
+  if (typeof Value !== "number" || !Number.isFinite(Value)) {
+    throw InvalidToolArguments(`${Name} must be a finite number.`, { Argument: Name });
+  }
+  if (Value < Minimum || Value > Maximum) {
+    throw InvalidToolArguments(`${Name} must be between ${Minimum} and ${Maximum}.`, { Argument: Name });
+  }
+  return Value;
+}
+
+function RequireInputScenarioIdentifier(Value, Name) {
+  const Identifier = RequireString(Value, Name);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(Identifier)) {
+    throw InvalidToolArguments(`${Name} must be a Roblox enum/property identifier.`, { Argument: Name });
+  }
+  return Identifier;
+}
+
+function RequireInputScenarioPath(Value, Name) {
+  const PathValue = RequireString(Value, Name);
+  if (PathValue.length > 500) {
+    throw InvalidToolArguments(`${Name} must not exceed 500 characters.`, { Argument: Name });
+  }
+  return PathValue;
+}
+
+function LuaString(Value) {
+  return `"${String(Value)
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")}"`;
+}
+
+function LuaNumber(Value, Name, Minimum = -1_000_000, Maximum = 1_000_000) {
+  return String(RequireFiniteNumber(Value, Name, Minimum, Maximum));
+}
+
+function LuaBoolean(Value, Name) {
+  if (typeof Value !== "boolean") {
+    throw InvalidToolArguments(`${Name} must be a boolean.`, { Argument: Name });
+  }
+  return Value ? "true" : "false";
+}
+
+function LuaVector2(Value, Name) {
+  const VectorValue = RequireObject(Value, Name);
+  return `Vector2.new(${LuaNumber(VectorValue.X, `${Name}.X`)}, ${LuaNumber(VectorValue.Y, `${Name}.Y`)})`;
+}
+
+function LuaVector3(Value, Name) {
+  const VectorValue = RequireObject(Value, Name);
+  return `Vector3.new(${LuaNumber(VectorValue.X, `${Name}.X`)}, ${LuaNumber(VectorValue.Y, `${Name}.Y`)}, ${LuaNumber(VectorValue.Z, `${Name}.Z`)})`;
+}
+
+function LuaExpectedValue(Value, Name) {
+  if (typeof Value === "boolean") {
+    return LuaBoolean(Value, Name);
+  }
+  if (typeof Value === "number") {
+    return LuaNumber(Value, Name);
+  }
+  if (typeof Value === "string") {
+    return LuaString(Value);
+  }
+  if (typeof Value === "object" && Value !== null && !Array.isArray(Value)) {
+    if (Object.hasOwn(Value, "Z")) {
+      return LuaVector3(Value, Name);
+    }
+    if (Object.hasOwn(Value, "X") && Object.hasOwn(Value, "Y")) {
+      return LuaVector2(Value, Name);
+    }
+  }
+
+  throw InvalidToolArguments(
+    `${Name} must be a boolean, number, string, Vector2 object, or Vector3 object.`,
+    { Argument: Name },
+  );
+}
+
+function NormalizeInputScenarioSmokeName(Args) {
+  const SmokeTestName = RequireString(Args.SmokeTestName, "SmokeTestName");
+  if (SmokeTestName.length > 64 || !/^[A-Za-z0-9_-]+$/.test(SmokeTestName)) {
+    throw InvalidToolArguments(
+      "SmokeTestName may contain only letters, numbers, underscores, and hyphens, up to 64 characters.",
+      { Argument: "SmokeTestName" },
+    );
+  }
+  return SmokeTestName;
+}
+
+function CompileInputScenarioStep(RawStep, PathLabel) {
+  const Step = RequireObject(RawStep, PathLabel);
+  const Kind = OptionalEnum(Step.Kind, `${PathLabel}.Kind`, InputScenarioStepKinds);
+  if (!Kind) {
+    throw InvalidToolArguments(`${PathLabel}.Kind is required.`, { Argument: `${PathLabel}.Kind` });
+  }
+
+  switch (Kind) {
+    case "WaitForPlayer":
+      return "WaitForPlayer()";
+    case "WaitForCharacter":
+      return `WaitForCharacter(${LuaNumber(Step.TimeoutSeconds ?? 10, `${PathLabel}.TimeoutSeconds`, 0.1, 60)})`;
+    case "WaitForPath":
+      return `ResolvePath(${LuaString(RequireInputScenarioPath(Step.Path, `${PathLabel}.Path`))}, ${LuaNumber(
+        Step.TimeoutSeconds ?? 5,
+        `${PathLabel}.TimeoutSeconds`,
+        0,
+        60,
+      )})`;
+    case "Wait":
+      return `task.wait(${LuaNumber(Step.Seconds, `${PathLabel}.Seconds`, 0, 60)})`;
+    case "Key":
+      return `SendKey(Enum.KeyCode.${RequireInputScenarioIdentifier(
+        Step.KeyCode,
+        `${PathLabel}.KeyCode`,
+      )}, ${LuaBoolean(Step.IsPressed, `${PathLabel}.IsPressed`)}, ${LuaBoolean(
+        Step.IsRepeatedKey ?? false,
+        `${PathLabel}.IsRepeatedKey`,
+      )})`;
+    case "MouseMove":
+      return `SendMousePosition(${LuaVector2(Step.Position, `${PathLabel}.Position`)})`;
+    case "MouseButton":
+      return `SendMouseButton(${LuaVector2(Step.Position, `${PathLabel}.Position`)}, Enum.UserInputType.${OptionalEnum(
+        Step.Button,
+        `${PathLabel}.Button`,
+        InputScenarioMouseButtons,
+      ) ?? "MouseButton1"}, ${LuaBoolean(Step.IsDown, `${PathLabel}.IsDown`)}, ${LuaNumber(
+        Step.RepeatCount ?? 0,
+        `${PathLabel}.RepeatCount`,
+        0,
+        10,
+      )})`;
+    case "TextInput":
+      return `SendTextInput(${LuaString(RequireString(Step.Text, `${PathLabel}.Text`))})`;
+    case "PointerAction": {
+      const PointerParts = [];
+      if (Step.Wheel !== undefined) {
+        PointerParts.push(`Wheel = ${LuaNumber(Step.Wheel, `${PathLabel}.Wheel`, -10_000, 10_000)}`);
+      }
+      if (Step.Pan !== undefined) {
+        PointerParts.push(`Pan = ${LuaVector2(Step.Pan, `${PathLabel}.Pan`)}`);
+      }
+      if (Step.Pinch !== undefined) {
+        PointerParts.push(`Pinch = ${LuaNumber(Step.Pinch, `${PathLabel}.Pinch`, -10_000, 10_000)}`);
+      }
+      if (PointerParts.length === 0) {
+        throw InvalidToolArguments(
+          `${PathLabel} PointerAction requires Wheel, Pan, or Pinch.`,
+          { Argument: PathLabel },
+        );
+      }
+      return `SendPointerAction(${LuaVector2(Step.Position, `${PathLabel}.Position`)}, { ${PointerParts.join(", ")} })`;
+    }
+    case "InputBindingFire":
+      return `FireInputBinding(${LuaString(RequireInputScenarioPath(Step.Path, `${PathLabel}.Path`))}, ${LuaExpectedValue(
+        Step.State,
+        `${PathLabel}.State`,
+      )}, ${LuaNumber(Step.TimeoutSeconds ?? 5, `${PathLabel}.TimeoutSeconds`, 0, 60)})`;
+    case "AssertPathExists":
+      return `AssertPathExists(${LuaString(RequireInputScenarioPath(Step.Path, `${PathLabel}.Path`))}, ${LuaNumber(
+        Step.TimeoutSeconds ?? 5,
+        `${PathLabel}.TimeoutSeconds`,
+        0,
+        60,
+      )})`;
+    case "AssertAttribute":
+      return `AssertAttribute(${LuaString(RequireInputScenarioPath(Step.Path, `${PathLabel}.Path`))}, ${LuaString(
+        RequireString(Step.Attribute, `${PathLabel}.Attribute`),
+      )}, ${LuaExpectedValue(Step.Equals, `${PathLabel}.Equals`)}, ${LuaNumber(
+        Step.TimeoutSeconds ?? 5,
+        `${PathLabel}.TimeoutSeconds`,
+        0,
+        60,
+      )})`;
+    case "AssertProperty":
+      return `AssertProperty(${LuaString(RequireInputScenarioPath(Step.Path, `${PathLabel}.Path`))}, ${LuaString(
+        RequireInputScenarioIdentifier(Step.Property, `${PathLabel}.Property`),
+      )}, ${LuaExpectedValue(Step.Equals, `${PathLabel}.Equals`)}, ${LuaNumber(
+        Step.TimeoutSeconds ?? 5,
+        `${PathLabel}.TimeoutSeconds`,
+        0,
+        60,
+      )})`;
+    case "AssertLogContains":
+      return `AssertLogContains(${LuaString(RequireString(Step.Text, `${PathLabel}.Text`))}, ${LuaNumber(
+        Step.TimeoutSeconds ?? 2,
+        `${PathLabel}.TimeoutSeconds`,
+        0,
+        60,
+      )})`;
+    default:
+      throw new McpToolError(ErrorCategory.InternalMcpFailure, `Unhandled input scenario step kind: ${Kind}`);
+  }
+}
+
+function CompileInputScenarioScript(SmokeTestName, Steps, Assertions) {
+  const TestPrefix = `[CODEX_SMOKE:${SmokeTestName}]`;
+  const AllSteps = [
+    ...Steps.map((Step, Index) => ({ Step, Index: `Steps[${Index}]`, IsAssertion: false })),
+    ...Assertions.map((Step, Index) => ({ Step, Index: `Assertions[${Index}]`, IsAssertion: true })),
+  ];
+  let HasAssertion = false;
+  const StepLines = AllSteps.map(({ Step, Index, IsAssertion }) => {
+    const StepObject = RequireObject(Step, Index);
+    const Kind = RequireString(StepObject.Kind, `${Index}.Kind`);
+    if (InputScenarioAssertionKinds.includes(Kind)) {
+      HasAssertion = true;
+    } else if (IsAssertion) {
+      throw InvalidToolArguments(
+        `${Index}.Kind must be an assertion kind: ${InputScenarioAssertionKinds.join(", ")}.`,
+        { Argument: `${Index}.Kind` },
+      );
+    }
+    return `\t${CompileInputScenarioStep(StepObject, Index)}`;
+  });
+
+  if (!HasAssertion) {
+    throw InvalidToolArguments(
+      "RunInputScenario requires at least one assertion step or assertion entry.",
+      { Argument: "Assertions" },
+    );
+  }
+
+  return `local TestPrefix = ${LuaString(TestPrefix)}
+local Players = game:GetService("Players")
+local LogService = game:GetService("LogService")
+local UserInputService = game:GetService("UserInputService")
+
+local Connections = {}
+local TemporaryInstances = {}
+local ObservedLogs = {}
+local VirtualInput = nil
+
+local function Pass(Message: string)
+\tprint(TestPrefix, "PASS", Message)
+end
+
+local function Fail(Message: string)
+\terror(string.format("%s FAIL %s", TestPrefix, Message), 0)
+end
+
+local function Expect(Condition: boolean, Message: string)
+\tif Condition then
+\t\tPass(Message)
+\telse
+\t\tFail(Message)
+\tend
+end
+
+local function Cleanup()
+\tfor _, Connection in ipairs(Connections) do
+\t\tpcall(function()
+\t\t\tConnection:Disconnect()
+\t\tend)
+\tend
+\tfor _, InstanceValue in ipairs(TemporaryInstances) do
+\t\tpcall(function()
+\t\t\tif InstanceValue and InstanceValue.Parent then
+\t\t\t\tInstanceValue:Destroy()
+\t\t\tend
+\t\tend)
+\tend
+end
+
+table.insert(Connections, LogService.MessageOut:Connect(function(Message)
+\tif #ObservedLogs < 300 then
+\t\ttable.insert(ObservedLogs, tostring(Message))
+\tend
+end))
+
+local function GetVirtualInput()
+\tif VirtualInput then
+\t\treturn VirtualInput
+\tend
+\tVirtualInput = UserInputService:CreateVirtualInput()
+\tExpect(VirtualInput ~= nil, "VirtualInput is available")
+\treturn VirtualInput
+end
+
+local function SendInput(Message: string, Callback)
+\tlocal Ok, ErrorValue = pcall(Callback)
+\tlocal Detail = ""
+\tif not Ok then
+\t\tDetail = ": " .. tostring(ErrorValue)
+\tend
+\tExpect(Ok, Message .. Detail)
+end
+
+local function SendKey(KeyCode: Enum.KeyCode, IsPressed: boolean, IsRepeatedKey: boolean)
+\tSendInput("Key input sent", function()
+\t\tGetVirtualInput():SendKey(IsPressed, KeyCode, IsRepeatedKey)
+\tend)
+end
+
+local function SendMousePosition(Position: Vector2)
+\tSendInput("Mouse position sent", function()
+\t\tGetVirtualInput():SendMousePosition(Position)
+\tend)
+end
+
+local function SendMouseButton(Position: Vector2, Button: Enum.UserInputType, IsDown: boolean, RepeatCount: number)
+\tSendInput("Mouse button sent", function()
+\t\tGetVirtualInput():SendMouseButton(Position, Button, IsDown, RepeatCount)
+\tend)
+end
+
+local function SendTextInput(Text: string)
+\tSendInput("Text input sent", function()
+\t\tGetVirtualInput():SendTextInput(Text)
+\tend)
+end
+
+local function SendPointerAction(Position: Vector2, PointerAction)
+\tSendInput("Pointer action sent", function()
+\t\tGetVirtualInput():SendPointerAction(Position, PointerAction)
+\tend)
+end
+
+local function WaitForPlayer()
+\tlocal Player = Players.LocalPlayer
+\tExpect(Player ~= nil, "LocalPlayer is available")
+\treturn Player
+end
+
+local function WaitForCharacter(TimeoutSeconds: number)
+\tlocal Player = WaitForPlayer()
+\tlocal Character = Player.Character
+\tif Character then
+\t\tPass("Character is available")
+\t\treturn Character
+\tend
+\tlocal Deadline = os.clock() + TimeoutSeconds
+\twhile os.clock() < Deadline do
+\t\tCharacter = Player.Character
+\t\tif Character then
+\t\t\tPass("Character appeared")
+\t\t\treturn Character
+\t\tend
+\t\ttask.wait(0.05)
+\tend
+\tFail("Character did not appear")
+end
+
+local function ResolvePath(Path: string, TimeoutSeconds: number)
+\tlocal Segments = string.split(Path, ".")
+\tExpect(#Segments > 0, "Path has segments")
+\tlocal Current = nil
+\tlocal ServiceOk, ServiceValue = pcall(function()
+\t\treturn game:GetService(Segments[1])
+\tend)
+\tif ServiceOk then
+\t\tCurrent = ServiceValue
+\telse
+\t\tCurrent = game:FindFirstChild(Segments[1])
+\tend
+\tExpect(Current ~= nil, "Path root exists: " .. Segments[1])
+\tfor Index = 2, #Segments do
+\t\tlocal Deadline = os.clock() + TimeoutSeconds
+\t\tlocal Child = Current:FindFirstChild(Segments[Index])
+\t\twhile not Child and os.clock() < Deadline do
+\t\t\ttask.wait(0.05)
+\t\t\tChild = Current:FindFirstChild(Segments[Index])
+\t\tend
+\t\tExpect(Child ~= nil, "Path segment exists: " .. Segments[Index])
+\t\tCurrent = Child
+\tend
+\treturn Current
+end
+
+local function ValuesEqual(Actual, Expected)
+\tif typeof(Actual) == "Vector2" and typeof(Expected) == "Vector2" then
+\t\treturn (Actual - Expected).Magnitude < 0.001
+\tend
+\tif typeof(Actual) == "Vector3" and typeof(Expected) == "Vector3" then
+\t\treturn (Actual - Expected).Magnitude < 0.001
+\tend
+\treturn Actual == Expected
+end
+
+local function AssertPathExists(Path: string, TimeoutSeconds: number)
+\tResolvePath(Path, TimeoutSeconds)
+\tPass("Path exists: " .. Path)
+end
+
+local function AssertAttribute(Path: string, Attribute: string, Expected, TimeoutSeconds: number)
+\tlocal Target = ResolvePath(Path, TimeoutSeconds)
+\tlocal Actual = Target:GetAttribute(Attribute)
+\tExpect(ValuesEqual(Actual, Expected), "Attribute matched: " .. Path .. "." .. Attribute)
+end
+
+local function AssertProperty(Path: string, Property: string, Expected, TimeoutSeconds: number)
+\tlocal Target = ResolvePath(Path, TimeoutSeconds)
+\tlocal Ok, Actual = pcall(function()
+\t\treturn Target[Property]
+\tend)
+\tExpect(Ok and ValuesEqual(Actual, Expected), "Property matched: " .. Path .. "." .. Property)
+end
+
+local function AssertLogContains(Text: string, TimeoutSeconds: number)
+\tlocal Deadline = os.clock() + TimeoutSeconds
+\trepeat
+\t\tfor _, Message in ipairs(ObservedLogs) do
+\t\t\tif string.find(Message, Text, 1, true) then
+\t\t\t\tPass("Log contained: " .. Text)
+\t\t\t\treturn
+\t\t\tend
+\t\tend
+\t\ttask.wait(0.05)
+\tuntil os.clock() >= Deadline
+\tFail("Log did not contain: " .. Text)
+end
+
+local function FireInputBinding(Path: string, State, TimeoutSeconds: number)
+\tlocal Target = ResolvePath(Path, TimeoutSeconds)
+\tlocal Binding = Target
+\tif Target:IsA("InputAction") then
+\t\tBinding = Instance.new("InputBinding")
+\t\tBinding.Name = "CodexScriptableBinding"
+\t\tBinding.Type = Enum.InputBindingType.Scriptable
+\t\tBinding.Parent = Target
+\t\ttable.insert(TemporaryInstances, Binding)
+\tend
+\tExpect(Binding:IsA("InputBinding"), "InputBinding target is available")
+\tlocal Ok, ErrorValue = pcall(function()
+\t\tBinding:Fire(State)
+\tend)
+\tlocal Detail = ""
+\tif not Ok then
+\t\tDetail = ": " .. tostring(ErrorValue)
+\tend
+\tExpect(Ok, "InputBinding fired" .. Detail)
+end
+
+local Success, Result = pcall(function()
+${StepLines.join("\n")}
+end)
+
+Cleanup()
+
+if not Success then
+\twarn(TestPrefix, "ERROR", Result)
+\terror(Result, 0)
+end
+
+print(TestPrefix, "COMPLETE")
+`;
+}
+
+function BuildInputScenarioParams(Args) {
+  const SmokeTestName = NormalizeInputScenarioSmokeName(Args);
+  const Steps = RequireArray(Args.Steps, "Steps", 1, MaxInputScenarioSteps);
+  const Assertions = OptionalArray(Args.Assertions, "Assertions", MaxInputScenarioAssertions);
+  const TemporaryLocalScript = CompileInputScenarioScript(SmokeTestName, Steps, Assertions);
+  if (TemporaryLocalScript.length > MaxInputScenarioSourceLength) {
+    throw InvalidToolArguments(
+      `Generated TemporaryLocalScript must not exceed ${MaxInputScenarioSourceLength} characters.`,
+      { Argument: "Steps" },
+    );
+  }
+
+  return {
+    timeout: OptionalInteger(Args.TimeoutSeconds, "TimeoutSeconds", 1, 90) ?? 10,
+    maxLogs: OptionalInteger(Args.MaxLogs, "MaxLogs", 1, 2000) ?? 300,
+    includeMessages: true,
+    includeWarnings: true,
+    includeErrors: true,
+    compactResult: true,
+    smokeTestName: SmokeTestName,
+    localScript: TemporaryLocalScript,
+    localScriptLocation:
+      OptionalEnum(Args.TemporaryClientLocation, "TemporaryClientLocation", [
+        "StarterPlayerScripts",
+        "ReplicatedFirst",
+      ]) ?? "StarterPlayerScripts",
+  };
+}
+
 function CompactObject(Value) {
   const Result = {};
   for (const [Key, Entry] of Object.entries(Value)) {
@@ -602,6 +1130,119 @@ function Tools() {
       { readOnlyHint: false },
     ),
     JsonTool(
+      "RunInputScenario",
+      "Run Input Scenario",
+      "Run a bounded Studio playtest with a generated temporary LocalScript that simulates input and checks assertions.",
+      {
+        ...SessionProperties,
+        SmokeTestName: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          pattern: "^[A-Za-z0-9_-]+$",
+          description: "Unique smoke-test name used in the required [CODEX_SMOKE:<name>] log prefix.",
+        },
+        TimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 90,
+          default: 10,
+          description: "How long Studio should remain in play mode.",
+        },
+        MaxLogs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 2000,
+          default: 300,
+          description: "Maximum number of captured log entries to return.",
+        },
+        TemporaryClientLocation: {
+          type: "string",
+          enum: ["StarterPlayerScripts", "ReplicatedFirst"],
+          default: "StarterPlayerScripts",
+          description: "Use ReplicatedFirst only when initialization order is under test.",
+        },
+        Steps: {
+          type: "array",
+          minItems: 1,
+          maxItems: MaxInputScenarioSteps,
+          description: "Bounded input and wait steps compiled into the temporary LocalScript.",
+          items: {
+            type: "object",
+            properties: {
+              Kind: {
+                type: "string",
+                enum: InputScenarioStepKinds,
+              },
+              Path: { type: "string" },
+              TimeoutSeconds: { type: "number", minimum: 0, maximum: 60 },
+              Seconds: { type: "number", minimum: 0, maximum: 60 },
+              KeyCode: { type: "string" },
+              IsPressed: { type: "boolean" },
+              IsRepeatedKey: { type: "boolean" },
+              Position: {
+                type: "object",
+                properties: {
+                  X: { type: "number" },
+                  Y: { type: "number" },
+                },
+                required: ["X", "Y"],
+                additionalProperties: false,
+              },
+              Button: {
+                type: "string",
+                enum: InputScenarioMouseButtons,
+              },
+              IsDown: { type: "boolean" },
+              RepeatCount: { type: "number", minimum: 0, maximum: 10 },
+              Text: { type: "string" },
+              Wheel: { type: "number" },
+              Pan: {
+                type: "object",
+                properties: {
+                  X: { type: "number" },
+                  Y: { type: "number" },
+                },
+                required: ["X", "Y"],
+                additionalProperties: false,
+              },
+              Pinch: { type: "number" },
+              State: {},
+              Attribute: { type: "string" },
+              Property: { type: "string" },
+              Equals: {},
+            },
+            required: ["Kind"],
+            additionalProperties: false,
+          },
+        },
+        Assertions: {
+          type: "array",
+          maxItems: MaxInputScenarioAssertions,
+          description: "Optional assertion entries appended after Steps.",
+          items: {
+            type: "object",
+            properties: {
+              Kind: {
+                type: "string",
+                enum: InputScenarioAssertionKinds,
+              },
+              Path: { type: "string" },
+              Attribute: { type: "string" },
+              Property: { type: "string" },
+              Equals: {},
+              Text: { type: "string" },
+              TimeoutSeconds: { type: "number", minimum: 0, maximum: 60 },
+            },
+            required: ["Kind"],
+            additionalProperties: false,
+          },
+        },
+      },
+      ["SmokeTestName", "Steps"],
+      { readOnlyHint: false },
+    ),
+    JsonTool(
       "CaptureScreenshot",
       "Capture Screenshot",
       "Capture a Studio viewport screenshot through the existing bridge screenshot action.",
@@ -801,6 +1442,8 @@ function NormalizeStudioParams(ToolName, Arguments) {
           localScriptLocation: TemporaryClientLocation,
         };
       }
+    case "RunInputScenario":
+      return BuildInputScenarioParams(Args);
     default:
       throw new McpToolError(
         ErrorCategory.InternalMcpFailure,
@@ -978,7 +1621,9 @@ function NormalizeStudioTestResult(Value, Arguments) {
 }
 
 function FormatToolResult(ToolName, Result, Arguments) {
-  return ToolName === "RunStudioTests" ? NormalizeStudioTestResult(Result, Arguments) : Result;
+  return ToolName === "RunStudioTests" || ToolName === "RunInputScenario"
+    ? NormalizeStudioTestResult(Result, Arguments)
+    : Result;
 }
 
 function ExtractImmediateResult(ResponseJson) {
@@ -1171,7 +1816,8 @@ async function CallStudioAction(ToolName, Arguments) {
   }
 
   const QueuedRequestId = ExtractRequestId(Response.Json, RequestId);
-  const DefaultTimeoutMs = ToolName === "RunStudioTests" ? (Params.timeout + 60) * 1000 : 30000;
+  const DefaultTimeoutMs =
+    ToolName === "RunStudioTests" || ToolName === "RunInputScenario" ? (Params.timeout + 60) * 1000 : 30000;
   const PolledResult = await PollStudioResult(QueuedRequestId, Headers, DefaultTimeoutMs);
   const Result = RequireSuccessfulStudioResult(PolledResult, ToolName, ActionName, QueuedRequestId);
   return TextResult(FormatToolResult(ToolName, Result, Args));

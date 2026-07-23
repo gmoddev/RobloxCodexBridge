@@ -18,6 +18,7 @@ Use this skill when a user asks Codex to inspect a live Roblox Studio project th
 - Use `SerializeInstance` for debug snapshots or rollback planning, not routine UI inspection.
 - Use `CaptureScreenshot` only when visual verification matters.
 - Use `RunStudioTests` only when the user asks to run or test the project, enter play mode, or capture runtime output.
+- Use `RunInputScenario` when the user asks to test keyboard, mouse, text, pointer, ContextActionService, or Input Action System bindings with bounded input steps and assertions.
 
 ## Module Shape Rule
 
@@ -61,10 +62,11 @@ If a public MCP input must be lower camel case for compatibility, convert it to 
 
 ## Safety
 
-- Treat inspection tools as read-only. `RunStudioTests` executes project scripts in a temporary Studio play session.
+- Treat inspection tools as read-only. `RunStudioTests` and `RunInputScenario` execute project scripts in a temporary Studio play session.
 - Do not use `RunCode` for normal inspection.
 - Do not run a playtest automatically while performing routine inspection.
 - Temporary smoke scripts are allowed only as part of an explicitly requested test or runtime verification. Do not use them for routine inspection.
+- `RunInputScenario` is preferred over hand-written `TemporaryLocalScript` when declarative input steps cover the behavior.
 - Ask before any other future write or destructive Studio action.
 - Do not log secrets or large script bodies unnecessarily.
 - Respect tool limits such as `MaxDepth`, `MaxNodes`, `MaxResults`, and line ranges.
@@ -144,11 +146,65 @@ After the temporary run:
 
 If cleanup is not verified, stop testing and report the remaining path. Do not inject another temporary script over it.
 
+## Input Scenarios
+
+Use `RunInputScenario` for end-to-end client input binding checks. It compiles PascalCase `Steps` and `Assertions` into an owned `TemporaryLocalScript`, then calls the same Studio `playtest` action as `RunStudioTests`.
+
+Supported step kinds:
+
+- `WaitForPlayer`
+- `WaitForCharacter`
+- `WaitForPath`
+- `Wait`
+- `Key`
+- `MouseMove`
+- `MouseButton`
+- `TextInput`
+- `PointerAction`
+- `InputBindingFire`
+- `AssertPathExists`
+- `AssertAttribute`
+- `AssertProperty`
+- `AssertLogContains`
+
+Rules:
+
+- Always include `SmokeTestName`.
+- Always include at least one assertion step or `Assertions` entry.
+- Use `Key`/`MouseButton`/`TextInput` when the physical binding itself is under test.
+- Use `InputBindingFire` when the project uses `InputAction`/`InputBinding` and the logical action graph is what matters.
+- Avoid reserved Roblox core keys such as `Escape`.
+- Avoid mouse positions over CoreGui.
+- Keep waits bounded and short.
+
+Example:
+
+```json
+{
+  "SmokeTestName": "InputInteract",
+  "TimeoutSeconds": 10,
+  "Steps": [
+    { "Kind": "WaitForPlayer" },
+    { "Kind": "Key", "KeyCode": "E", "IsPressed": true },
+    { "Kind": "Wait", "Seconds": 0.1 },
+    { "Kind": "Key", "KeyCode": "E", "IsPressed": false }
+  ],
+  "Assertions": [
+    {
+      "Kind": "AssertLogContains",
+      "Text": "Interact completed",
+      "TimeoutSeconds": 2
+    }
+  ]
+}
+```
+
 ## Common Flow
 
 1. Call `GetStudioSession` to confirm the local bridge and Studio connection status.
 2. For UI work, call `ReadGuiTree` with `RootUniqueId` omitted to inspect `StarterGui` (`sg1`).
 3. For scripts, use `ListInstances` or `GlobInstances` to find the script, then `ReadScript`.
-4. For requested runtime verification, call `RunStudioTests` and summarize its `Summary`, `Errors`, and relevant `Logs`.
-5. When no existing test covers a required behavior, follow the `_TemporaryCODEXScript` workflow and finish with a clean run.
-6. If a result is truncated, narrow the root, lower the scope, or reduce the playtest duration before retrying.
+4. For requested input binding verification, use `RunInputScenario` when declarative steps are enough.
+5. For other requested runtime verification, call `RunStudioTests` and summarize its `Summary`, `Errors`, and relevant `Logs`.
+6. When no existing test covers a required behavior, follow the `_TemporaryCODEXScript` workflow and finish with a clean run.
+7. If a result is truncated, narrow the root, lower the scope, or reduce the playtest duration before retrying.
